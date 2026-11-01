@@ -1,4 +1,6 @@
-"""``hermes omo status | feed | world``.
+"""``hermes omo setup | status | feed | world``.
+
+``setup`` is the guided onboarding checklist (see onboarding.py; never prompts without a TTY).
 
 ``status`` is a doctor: bridge reachability on the configured loopback URL, feed dir + marker, age of
 the last event, which profiles on this machine have an omo-space feed, and one clear next step.
@@ -17,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, TextIO
 
-from . import tools
+from . import onboarding, tools
 from .feed import Feed
 
 EVENT_FILES = ("events.1.jsonl", "events.jsonl")
@@ -43,8 +45,24 @@ def _load_world_cli():
     return world_cli
 
 
+def add_install_arguments(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """``--install [WORLD]``, ``--list-worlds`` and ``--saves-dir`` on top of worldgen's ``world`` parser."""
+    p.add_argument("--install", nargs="?", const="", default=None, metavar="WORLD",
+                   help="write the datapack straight into <saves>/WORLD/datapacks/<namespace>/ (WORLD may be "
+                        "omitted when there is only one world); refuses to replace it without --force")
+    p.add_argument("--list-worlds", action="store_true", help="list the Omo Space worlds and exit")
+    p.add_argument("--saves-dir", default=None,
+                   help="Minecraft saves dir (default: Omo Space's, e.g. ~/.local/share/omo/runtime/game/saves)")
+    return p
+
+
 def setup_parser(subparser: argparse.ArgumentParser) -> None:
-    subs = subparser.add_subparsers(dest="omo_command", metavar="{status,feed,world}")
+    subs = subparser.add_subparsers(dest="omo_command", metavar="{setup,status,feed,world}")
+    se = subs.add_parser("setup", help="Guided checklist: Omo Space, bridge port, profiles, Hermes HQ world")
+    se.add_argument("--enable-all", action="store_true",
+                    help="offer to enable omo-space in every other profile (asks first; needs a terminal)")
+    se.add_argument("--non-interactive", action="store_true", help="print the checklist only, never prompt")
+    se.add_argument("--json", action="store_true", help="print the checklist data as JSON")
     st = subs.add_parser("status", help="Doctor: is Omo Space reachable and is this profile's feed healthy?")
     st.add_argument("--json", action="store_true", help="Print machine-readable JSON")
     fd = subs.add_parser("feed", help="Print this profile's Omo activity feed (metadata only)")
@@ -53,13 +71,17 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     fd.add_argument("-n", "--lines", type=int, default=20, metavar="N", help="How many recent events (default 20)")
     world_cli = _load_world_cli()
     if world_cli is not None:
-        world_cli.add_parser(subs)
+        world = world_cli.add_parser(subs)
+        if isinstance(world, argparse.ArgumentParser):
+            add_install_arguments(world)
     else:
         subs.add_parser("world", help="Generate the Hermes HQ datapack (world generator not installed)")
 
 
 def run(args: argparse.Namespace, runtime: Runtime) -> int:
     sub = getattr(args, "omo_command", None)
+    if sub == "setup":
+        return onboarding.setup(args, runtime, world_cli=_load_world_cli())
     if sub == "status":
         return doctor(runtime, as_json=bool(getattr(args, "json", False)))
     if sub == "feed":
@@ -70,11 +92,14 @@ def run(args: argparse.Namespace, runtime: Runtime) -> int:
         if world_cli is None:
             print("world generator not installed (the omo-space worldgen package is missing)")
             return 1
+        if getattr(args, "install", None) is not None or getattr(args, "list_worlds", False):
+            return onboarding.world_install(args, world_cli)
         return world_cli.run(args) or 0
-    print("usage: hermes omo {status,feed,world}\n"
+    print("usage: hermes omo {setup,status,feed,world}\n"
+          "  setup    guided checklist: Omo Space, bridge port, profiles, Hermes HQ world\n"
           "  status   doctor: bridge, feed, marker, last event, profiles, next step\n"
           "  feed     print this profile's activity feed (-n N, --json, --follow)\n"
-          "  world    generate the Hermes HQ Minecraft datapack")
+          "  world    generate the Hermes HQ Minecraft datapack (--install [WORLD] puts it in a save)")
     return 0
 
 
