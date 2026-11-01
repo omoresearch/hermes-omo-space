@@ -217,6 +217,34 @@ def test_layout_no_overlap_and_inside(n):
             assert abs(a[0] - c[0]) + abs(a[1] - c[1]) >= 5
 
 
+@pytest.mark.parametrize("n", [1, 2, 3, 4, 6, 7, 12, 47, 96])
+def test_plate_and_lamp_follow_their_own_station(n):
+    """omolife's unlinked Name Plate / Status Lamp follow the NEAREST station block within 8 blocks
+    (StatusBlockEntity.station(): BlockPos.distSqr, REACH 8). The templates place them unlinked, so in the
+    built hall (templates rotated 180) every plate and lamp must be strictly nearer its own desk's computer
+    than any other desk's (seen in the e2e rig: they carry no OmoLink, only their position decides)."""
+    REACH = 8
+    L = lay.plan_layout(n)
+    profile = {"name": "p", "label": "", "model": "", "skills": 0, "cron_jobs": 0, "platforms": [], "plugins": 0}
+    cells = dp.desk_template(profile).cells
+    def find(prefix):
+        return [pos for pos, (spec, _) in cells.items() if spec.startswith(prefix)]
+    (st_t,), (plate_t,), (lamp_t,) = find("omolife:hermes_computer"), find("omolife:name_plate"), \
+        find("omolife:status_lamp")
+
+    def world(desk, p):   # `place template ... 180`: (x, y, z) -> (X - x, Y + y, Z - z)
+        X, Y, Z = desk["template_pos"]
+        return (X - p[0], Y + p[1], Z - p[2])
+
+    stations = [world(d, st_t) for d in L["desks"]]
+    assert [s for s in stations] == [tuple(d["station"]) for d in L["desks"]]
+    for i, d in enumerate(L["desks"]):
+        for follower in (world(d, plate_t), world(d, lamp_t)):
+            dist = sorted((sum((a - b) ** 2 for a, b in zip(follower, s)), j) for j, s in enumerate(stations))
+            assert dist[0][1] == i and dist[0][0] <= REACH * REACH, (i, follower, dist[:2])
+            assert len(dist) == 1 or dist[1][0] > dist[0][0], ("tie", i, follower, dist[:2])
+
+
 # --------------------------------------------------------------------------- datapack
 MC_ROOTS = {"fill", "setblock", "tellraw", "particle", "summon", "data", "execute", "say", "function",
             "place", "kill"}
