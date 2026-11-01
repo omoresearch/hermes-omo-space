@@ -3,10 +3,13 @@
 Registers (see plugin.yaml, which must list exactly these):
 - hooks that write a metadata-only activity feed into this plugin's own profile-scoped data dir;
 - tools ``omo_status`` (read-only bridge check) and ``omo_notify`` (queue an in-game toast), toolset ``omo``;
-- the ``/omo`` slash command and the ``hermes omo status|feed|world`` CLI.
+- the ``/omo`` slash command and the ``hermes omo setup|status|feed|world`` CLI.
 
-Compatible with Hermes v0.22.5 and newer: optional context surfaces (``ctx.state``,
-``ctx.get_config``, ``ctx.profile_name``) are probed and have stdlib fallbacks.
+Requires Hermes v0.22.3+ (the first release with every hook used here; ``post_compaction`` landed in
+v0.22.3). Optional context surfaces (``ctx.state``, ``ctx.get_config``, ``ctx.profile_name``,
+``register_command``, ``register_cli_command``) are still probed with fallbacks, and Hermes stores an
+unknown hook name with a warning, so an older Hermes that ignores ``requires_hermes`` degrades
+instead of crashing.
 """
 
 from __future__ import annotations
@@ -167,7 +170,11 @@ def register(ctx: Any) -> None:
         except Exception as exc:  # noqa: BLE001
             return f"omo-space: status unavailable ({type(exc).__name__})."
 
-    ctx.register_command("omo", handler=slash_omo,
+    # register_command (v0.10+) and register_cli_command (v0.8+) are probed so that a Hermes too old to
+    # enforce requires_hermes (it is honoured from v0.21.2) still loads the hooks and tools.
+    register_command = getattr(ctx, "register_command", None)
+    if callable(register_command):
+        register_command("omo", handler=slash_omo,
                          description="Where this conversation lives in Omo Space, and whether the bridge is up")
 
     runtime = cli.Runtime(feed=feed, bridge_url_setting=bridge_url(), profile=profile)
@@ -177,6 +184,8 @@ def register(ctx: Any) -> None:
         runtime.bridge_url_setting = bridge_url()
         return cli.run(args, runtime)
 
-    ctx.register_cli_command(name="omo", help="Omo Space: doctor, activity feed, Hermes HQ world",
+    register_cli_command = getattr(ctx, "register_cli_command", None)
+    if callable(register_cli_command):
+        register_cli_command(name="omo", help="Omo Space: setup, doctor, activity feed, Hermes HQ world",
                              setup_fn=cli.setup_parser, handler_fn=handle_cli,
                              description="See this Hermes setup as a place inside Omo Space.")

@@ -1,6 +1,7 @@
 """Metadata-only activity feed (contract v1) and the hook callbacks that write it.
 
-Layout under ``<plugin data dir>/feed/`` (dir 0700, files 0600):
+Layout under ``<plugin data dir>/feed/`` (dir 0700, files 0600 on POSIX; on Windows the profile
+dir's per-user ACL applies):
 
 - ``omo-feed.json``           marker, rewritten atomically on register
 - ``sessions/<sid>.json``     one presence snapshot per session (atomic replace)
@@ -128,6 +129,29 @@ def redact_text(text: Any, limit: int = NOTIFY_MAX) -> str:
 
 # --------------------------------------------------------------------------- the writer
 
+
+REPLACE_RETRIES = 4          # Windows only: a reader holding the file open makes os.replace fail
+REPLACE_RETRY_S = 0.01
+
+
+def _windows() -> bool:
+    return os.name == "nt"
+
+
+def _replace(src: Any, dst: Any) -> None:
+    """``os.replace``; on Windows, retry a few ms when another process (the Omo bridge reading the
+    feed) holds ``dst`` open, instead of tripping the 30 s back-off on a sharing violation."""
+    attempts = REPLACE_RETRIES if _windows() else 0
+    while True:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempts <= 0:
+                raise
+            attempts -= 1
+            time.sleep(REPLACE_RETRY_S)
+
 class Feed:
     """Profile-scoped feed writer. One instance per loaded plugin (per process)."""
 
@@ -201,7 +225,9 @@ class Feed:
             return
         for d in (self.root, self.sessions_dir):
             d.mkdir(mode=0o700, parents=True, exist_ok=True)
-            if (d.stat().st_mode & 0o777) != 0o700:
+            # POSIX only: on Windows chmod just toggles the read-only bit and st_mode is synthetic, so
+            # the per-user ACL of the profile dir is what protects the feed there.
+            if not _windows() and (d.stat().st_mode & 0o777) != 0o700:
                 os.chmod(d, 0o700)
         self._dirs_ok = True
 
@@ -215,7 +241,7 @@ class Feed:
         finally:
             os.close(fd)
         try:
-            os.replace(tmp, path)
+            _replace(tmp, path)
         except BaseException:
             try:
                 os.unlink(tmp)
@@ -255,7 +281,7 @@ class Feed:
             path = self.root / "events.jsonl"
             try:
                 if os.stat(path).st_size + len(line) > ROTATE_BYTES:
-                    os.replace(path, self.root / "events.1.jsonl")
+                    _replace(path, self.root / "events.1.jsonl")
             except FileNotFoundError:
                 pass
             fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
