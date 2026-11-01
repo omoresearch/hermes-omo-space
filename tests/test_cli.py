@@ -186,3 +186,33 @@ def test_status_flags_a_bridge_without_feed_support(plugin, tmp_path, fake_bridg
     _run(plugin, rt, ["omo", "status"], monkeypatch)
     out = capsys.readouterr().out
     assert "predates Hermes feed support" in out.split("Next step", 1)[1]
+
+
+def test_board_port_prefers_profile_setting_then_env_then_detected(plugin, tmp_path, monkeypatch):
+    rt = _runtime(plugin, tmp_path)
+    cli = plugin.cli
+    rt.bridge_url_setting = "http://127.0.0.1:8781"
+    monkeypatch.setenv("OMO_PORT", "8799")
+    assert cli.board_port(rt, detect=lambda: {"port": 8785}) == (8781, "this profile's bridge_url")
+    rt.bridge_url_setting = ""
+    assert cli.board_port(rt, detect=lambda: {"port": 8785}) == (8799, "OMO_PORT")
+    monkeypatch.delenv("OMO_PORT")
+    assert cli.board_port(rt, detect=lambda: {"port": 8785}) == (8785, "your Omo bridge")
+    assert cli.board_port(rt, detect=lambda: {"port": None}) == (None, "")
+    rt.bridge_url_setting = "http://example.com:80"   # non-loopback is refused, falls through
+    assert cli.board_port(rt, detect=lambda: (_ for _ in ()).throw(OSError())) == (None, "")
+
+
+def test_world_uses_the_profiles_bridge_port(plugin, tmp_path, monkeypatch):
+    seen = []
+
+    def add_parser(subparsers):
+        p = subparsers.add_parser("world")
+        p.add_argument("--bridge-port", type=int, default=None)
+        return p
+    fake = types.SimpleNamespace(add_parser=add_parser, run=lambda args: seen.append(args.bridge_port) or 0)
+    rt = _runtime(plugin, tmp_path)
+    rt.bridge_url_setting = "http://127.0.0.1:8781"
+    _run(plugin, rt, ["omo", "world"], monkeypatch, world=fake)
+    _run(plugin, rt, ["omo", "world", "--bridge-port", "9000"], monkeypatch, world=fake)
+    assert seen == [8781, 9000]

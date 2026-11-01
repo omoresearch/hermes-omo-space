@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import time
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, TextIO
@@ -78,6 +79,30 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
         subs.add_parser("world", help="Generate the Hermes HQ datapack (world generator not installed)")
 
 
+def board_port(runtime: Runtime, detect: Any = None) -> tuple[Optional[int], str]:
+    """The port the Hermes HQ Board wall should load: this profile's bridge_url setting, else
+    OMO_PORT, else the user's own bridge found the way `setup` finds it. (None, "") = leave
+    worldgen's default."""
+    setting = runtime.bridge_url_setting
+    if setting:
+        try:
+            port = urllib.parse.urlsplit(tools.resolve_bridge_url(setting)).port
+            if port:
+                return port, "this profile's bridge_url"
+        except ValueError:
+            pass
+    raw = str(os.environ.get("OMO_PORT", "")).strip()
+    if raw.isdigit() and 0 < int(raw) < 65536:
+        return int(raw), "OMO_PORT"
+    try:
+        found = (detect or onboarding.detect_bridge)()
+    except Exception:  # noqa: BLE001 - detection is best effort
+        return None, ""
+    if found and found.get("port"):
+        return int(found["port"]), "your Omo bridge"
+    return None, ""
+
+
 def run(args: argparse.Namespace, runtime: Runtime) -> int:
     sub = getattr(args, "omo_command", None)
     if sub == "setup":
@@ -92,6 +117,12 @@ def run(args: argparse.Namespace, runtime: Runtime) -> int:
         if world_cli is None:
             print("world generator not installed (the omo-space worldgen package is missing)")
             return 1
+        if hasattr(args, "bridge_port") and args.bridge_port is None:
+            port, source = board_port(runtime)
+            if port is not None:
+                args.bridge_port = port
+                print(f"Board wall -> http://127.0.0.1:{port}/board ({source}; override with --bridge-port)",
+                      file=sys.stderr)
         if getattr(args, "install", None) is not None or getattr(args, "list_worlds", False):
             return onboarding.world_install(args, world_cli)
         return world_cli.run(args) or 0
