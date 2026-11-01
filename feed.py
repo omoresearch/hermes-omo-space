@@ -140,7 +140,7 @@ class Feed:
         self.enabled = bool(enabled)
         self.notify_on_finish = bool(notify_on_finish)
         self._clock = clock
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # re-entrant: on_session_end -> notify
         self._sessions: dict[str, dict] = {}
         self._meta: dict[str, dict] = {}          # sid -> {"last_write", "last_state", "turn_start", ...}
         self._parents: dict[str, str] = {}        # child session id -> parent session id

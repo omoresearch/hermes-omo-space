@@ -307,9 +307,11 @@ def omo_notify(args: Any = None, *, feed: Optional[Feed] = None, **kwargs: Any) 
             return json.dumps({"queued": False, "error": "the omo-space feed is disabled (setting feed: false)"})
         raw_sid = kwargs.get("session_id") or kwargs.get("task_id") or ""
         sid = sanitize_session_id(raw_sid) if isinstance(raw_sid, str) and raw_sid else ""
-        before = feed.events_written
-        event = feed.notify(text, level=args.get("level", "info"), session_id=sid)
-        if feed.events_written == before:
+        with feed._lock:  # serialise with the hooks: rotation and the written-counter check
+            before = feed.events_written
+            event = feed.notify(text, level=args.get("level", "info"), session_id=sid)
+            written = feed.events_written != before
+        if not written:
             return json.dumps({"queued": False, "error": f"could not write the feed: {feed.last_error}",
                                "event": event})
         return json.dumps({"queued": True, "event": event,

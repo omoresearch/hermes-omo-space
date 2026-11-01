@@ -231,3 +231,21 @@ def test_owner_check_skipped_off_linux_or_without_proc(plugin, feed, fake_bridge
     monkeypatch.setattr(plugin.tools.sys, "platform", "linux")
     monkeypatch.setattr(plugin.tools, "PROC_NET", str(tmp_path / "unreadable"))
     assert json.loads(plugin.tools.omo_status({}, feed=feed, bridge_url=fake_bridge.url))["bridge"]["up"] is True
+
+
+def test_notify_is_serialised_with_hooks(plugin, feed):
+    """omo_notify runs on a tool thread while hooks run on others (gateway): it must take the feed
+    lock so rotation and its written-counter check do not race a concurrent hook."""
+    import threading
+    feed._lock.acquire()                          # a hook is mid-write on another thread
+    done = threading.Event()
+    t = threading.Thread(target=lambda: (plugin.tools.omo_notify({"text": "x"}, feed=feed), done.set()))
+    t.start()
+    try:
+        assert not done.wait(0.3)                 # waits for the hook instead of interleaving
+    finally:
+        feed._lock.release()
+    assert done.wait(5)
+    t.join(5)
+    with feed._lock:                              # re-entrant: a hook may call notify itself
+        assert json.loads(plugin.tools.omo_notify({"text": "y"}, feed=feed))["queued"] is True
