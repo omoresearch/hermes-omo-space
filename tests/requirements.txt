@@ -1,0 +1,2 @@
+# Test-only requirements (not installed by Hermes). Run: python -m pytest -q
+pytest>=8,<10

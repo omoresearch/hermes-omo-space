@@ -1,0 +1,51 @@
+name: omo-space
+label: Omo Space
+kind: standalone
+version: "0.1.0"
+author: Omo Research
+license: MIT
+description: >
+  See your whole Hermes system (profiles, CLI/TUI/gateway sessions, subagents, cron, kanban) as a
+  place inside Omo Space, the Omo Research Minecraft world. Hooks write a metadata-only activity feed
+  (session/turn/tool starts and ends, kanban transitions, compactions, API error codes; never message
+  text, tool arguments or tool results) into this plugin's own plugin-data dir in the active profile,
+  which the Omo bridge reads to light desks and fill the Hermes Board. Adds the omo_status and
+  omo_notify tools (toolset omo), a /omo slash command and `hermes omo status|feed|world`.
+  Network: only loopback HTTP GETs to the local Omo bridge (/health, /board.json); nothing leaves the
+  machine. Writes only its own plugin-data dir (and, for `hermes omo world`, the output path you pass).
+  Reads no secrets, starts no background processes, never approves or blocks tools.
+requires_hermes: ">=0.22.5"
+tags: [omo, minecraft, observability, dashboard]
+provides_tools:
+  - omo_status
+  - omo_notify
+provides_hooks:
+  - on_session_start
+  - on_session_end
+  - on_session_finalize
+  - pre_llm_call
+  - pre_tool_call
+  - post_tool_call
+  - post_compaction
+  - api_request_error
+  - subagent_start
+  - subagent_stop
+  - kanban_task_claimed
+  - kanban_task_completed
+  - kanban_task_blocked
+config_schema:
+  feed:
+    type: bool
+    default: true
+    label: Activity feed
+    description: Write the metadata-only activity feed that Omo Space reads.
+  bridge_url:
+    type: str
+    default: ""
+    label: Bridge URL
+    description: Omo bridge URL. Empty means http://127.0.0.1:$OMO_PORT (or 8780). Loopback hosts only; anything else is refused.
+  notify_on_finish:
+    type: bool
+    default: false
+    label: Toast when a long turn finishes
+    description: Queue an in-game toast when a turn that took more than 60 seconds ends.
