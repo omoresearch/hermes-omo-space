@@ -10,14 +10,20 @@ description: >
   (session/turn/tool starts and ends, kanban transitions, compactions, API error codes; never message
   text, tool arguments or tool results) into this plugin's own plugin-data dir in the active profile,
   which the Omo bridge reads to light desks and fill the Hermes Board. Adds the omo_status and
-  omo_notify tools (toolset omo), a /omo slash command and `hermes omo status|feed|world`.
+  omo_notify tools (toolset omo), a /omo slash command and `hermes omo setup|status|feed|world`.
   Network: only loopback HTTP GETs to the local Omo bridge (/health, /board.json); nothing leaves the
   machine. On Linux it reads /proc/net/tcp{,6} to skip a bridge port owned by another user.
-  Writes only its own plugin-data dir (and, for `hermes omo world`, the output path you pass).
+  Writes only its own plugin-data dir (and, for `hermes omo world`, the output path you pass, or with
+  --install only <world>/datapacks/hermes_hq/ in an Omo Space save).
   `hermes omo world` reads every profile's profile.yaml, config.yaml (model, platform and plugin names
   only), cron/jobs.json (count) and skill/plugin dir names under your Hermes root.
+  `hermes omo setup` also reads each profile's plugins.enabled/disabled and plugin dir names; it runs
+  `hermes -p <profile> plugins enable omo-space` or `config set ...bridge_url` only after a y/N prompt
+  at a terminal, and without a TTY it only prints the commands.
   Reads no secrets, starts no background processes, never approves or blocks tools.
-requires_hermes: ">=0.22.5"
+# post_compaction (the newest hook used here) landed in v0.22.3; every other hook, get_config and
+# ctx.state are older (kanban_* 0.18.0, ctx.state/get_config 0.20.1, requires_hermes enforced 0.21.2).
+requires_hermes: ">=0.22.3"
 tags: [omo, minecraft, observability, dashboard]
 provides_tools:
   - omo_status
