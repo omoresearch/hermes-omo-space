@@ -222,7 +222,7 @@ def board_counts(board: Optional[dict]) -> Optional[dict]:
     hermes = board.get("hermes") if isinstance(board.get("hermes"), dict) else {}
     sessions = [s for s in hermes.get("sessions") or [] if isinstance(s, dict)]
     return {"workspaces": len(workspaces), "live": sum(1 for w in workspaces if w.get("state") == "live"),
-            "busy": sum(1 for t in tabs if t.get("busy")), "hermes_sessions": len(sessions),
+            "busy_tabs": sum(1 for t in tabs if t.get("busy")), "hermes_sessions": len(sessions),
             "elsewhere": sum(1 for s in sessions if s.get("elsewhere"))}
 
 

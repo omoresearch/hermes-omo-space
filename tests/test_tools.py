@@ -57,7 +57,7 @@ def test_status_with_bridge_up(plugin, feed, fake_bridge, monkeypatch):
     out = json.loads(plugin.tools.omo_status({}, feed=feed, bridge_url=fake_bridge.url, session_id="s-main"))
     assert out["bridge"]["up"] is True and out["bridge"]["version"] == "9.9.9"
     assert out["bridge"]["url"] == fake_bridge.url
-    assert out["board"]["workspaces"] == 2 and out["board"]["live"] == 1 and out["board"]["busy"] == 1
+    assert out["board"]["workspaces"] == 2 and out["board"]["live"] == 1 and out["board"]["busy_tabs"] == 1
     assert out["this_session"]["workspace"] == "Lab" and out["this_session"]["omo_workspace"] == "ws1"
     assert out["feed"]["enabled"] is True and out["feed"]["dir"] == str(feed.root)
     assert set(fake_bridge.hits) == {"/health", "/board.json"}

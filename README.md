@@ -19,6 +19,21 @@ The plugin adds four things:
    - `hermes omo feed [-n N] [--json] [--follow]`: print or follow this profile's feed.
    - `hermes omo world`: generate the *Hermes HQ* datapack (one Hermes Computer desk per profile plus a Hermes Board wall). Needs the bundled `worldgen` package.
 
+## Quickstart (you already run Hermes)
+
+1. Install Omo Space and open your world once, so the Omo bridge is running.
+2. Copy this folder to `~/.hermes/plugins/omo-space/` (or `~/.hermes/profiles/<p>/plugins/omo-space/` for one profile), then:
+   `hermes plugins enable omo-space` (per profile you want on the board).
+3. `hermes omo status`: it should say the bridge is yours and reachable. If your bridge is not on 8780:
+   `hermes config set plugins.entries.omo-space.settings.bridge_url http://127.0.0.1:<port>`.
+4. Optional: `hermes omo world --out ./hermes-hq-datapack`, copy it into `<world>/datapacks/`, run `/reload`,
+   stand in an open flat area, then `/function hermes_hq:preview` and `/function hermes_hq:build`.
+   You get one Hermes Computer desk per profile and a Hermes Board wall.
+5. Chat with Hermes anywhere (CLI, TUI, Telegram, cron). Desks light up and the Board shows what each agent is doing.
+
+After updating the plugin files while a Hermes gateway is running, run `hermes plugins disable omo-space`
+then `hermes plugins enable omo-space` so the gateway reloads the new code.
+
 ## What it does and does not do (disclosure)
 
 - **Network:** only plain-HTTP `GET /health` and `GET /board.json` to the Omo bridge on a
