@@ -33,7 +33,7 @@ from . import layout as L
 
 PACK_FORMAT = 107
 DATA_VERSION = 4903
-NAMESPACE_RE = re.compile(r"^[a-z0-9_]{1,48}$")
+NAMESPACE_RE = re.compile(r"^[a-z0-9_]{1,48}\Z")
 RESERVED_NAMESPACES = {"minecraft", "omolife", "computercraft", "fabric", "realms"}
 MAX_FILL = 32768
 

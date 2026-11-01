@@ -15,8 +15,8 @@ import re
 from pathlib import Path
 
 # The Omo bridge accepts exactly these profile names (omobridge.py PROFILE_RE).
-PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-_PLATFORM_RE = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")
+PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+_PLATFORM_RE = re.compile(r"^[A-Za-z0-9_.-]{1,32}\Z")
 
 # Mirrors hermes agent/skill_utils.py so counts match `hermes profile info`.
 EXCLUDED_SKILL_DIRS = frozenset((

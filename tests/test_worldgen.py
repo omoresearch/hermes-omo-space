@@ -566,7 +566,7 @@ def test_max_desks_truncates(fake_root):
     assert "2 more" in info or "not built" in info
 
 
-@pytest.mark.parametrize("ns", ["Bad", "a-b", "", "x y", "minecraft", "a" * 70, "../x"])
+@pytest.mark.parametrize("ns", ["Bad", "a-b", "", "x y", "minecraft", "a" * 70, "../x", "hq\n", "hq\nsay pwned"])
 def test_bad_namespace_rejected(ns, fake_root, tmp_path, capsys):
     rc = _run(["world", "--namespace", ns, "--out", str(tmp_path / "o")])
     assert rc == 2
@@ -661,3 +661,18 @@ def test_human_output_escapes_weird_names(fake_root, capsys):
 
 def test_package_exports():
     assert worldgen.PACK_FORMAT == 107
+
+
+def test_trailing_newline_names_are_rejected(fake_root):
+    """`$` also matches before a trailing newline; a newline in a profile name, platform name or
+    namespace must never pass validation (a newline ends an mcfunction command)."""
+    assert not inv.PROFILE_RE.match("work\n")
+    assert not inv._PLATFORM_RE.match("telegram\n")
+    assert not dp.NAMESPACE_RE.match("hq\n")
+    with pytest.raises(ValueError):
+        dp.build_files(inv.collect(fake_root), namespace="hq\n")
+    (fake_root / "profiles" / "evil\n").mkdir(parents=True)
+    (fake_root / "profiles" / "evil\n" / "config.yaml").write_text("model: x\n")
+    data = inv.collect(fake_root)
+    assert "evil\n" not in [p["name"] for p in data["profiles"]]
+    assert "evil\n" in [s["name"] for s in data["skipped"]]
