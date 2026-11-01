@@ -454,3 +454,12 @@ def test_failure_backoff_keeps_hooks_fast(plugin, tmp_path, clock, monkeypatch):
     for _ in range(50):
         h["pre_tool_call"](tool_name="t", args={}, task_id="s")
     assert len(calls) <= 2  # after the first failure the writer backs off instead of retrying every call
+
+
+def test_finalize_keeps_the_platform_the_turns_reported(feed):
+    h = feed.hooks()
+    h["on_session_start"](session_id="s-plat", model="m1", platform="cli")
+    h["on_session_finalize"](session_id="s-plat", platform="oneshot")
+    snap = _presence(feed, "s-plat")
+    assert snap["state"] == "ended" and snap["platform"] == "cli"
+    assert _events(feed)[-1]["platform"] == "cli"

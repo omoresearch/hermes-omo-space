@@ -451,7 +451,10 @@ class Feed:
         sid = self._session_id(kw, fallback="")
         if not sid:
             return
-        p = self._touch(sid, "ended", platform=kw.get("platform"))
+        # Keep the platform the session ran on: finalize may report a teardown label
+        # (e.g. "oneshot") that differs from the one the turns reported ("cli").
+        known = (self._sessions.get(sid) or {}).get("platform")
+        p = self._touch(sid, "ended", platform=None if known else kw.get("platform"))
         p["tool"], p["tool_since"] = None, None
         self._save(sid, force=True)
         self.emit("session_end", sid, interrupted=bool(self._meta[sid].get("interrupted", False)),
