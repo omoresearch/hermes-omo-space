@@ -176,3 +176,13 @@ def test_status_foreign_bridge_next_step(plugin, tmp_path, fake_bridge, monkeypa
     assert "reachable at" not in out and "another user" in out
     assert "Next step:" in out and "OMO_PORT" in out and "bridge_url" in out
     assert fake_bridge.hits == []
+
+
+def test_status_flags_a_bridge_without_feed_support(plugin, tmp_path, fake_bridge, monkeypatch, capsys):
+    fake_bridge.routes["/board.json"] = {"version": "1.0.0", "workspaces": []}   # no "hermes" key
+    rt = _runtime(plugin, tmp_path, bridge_url=fake_bridge.url)
+    rt.feed.write_marker()
+    rt.feed.emit("tool_end", "s1", tool="terminal")
+    _run(plugin, rt, ["omo", "status"], monkeypatch)
+    out = capsys.readouterr().out
+    assert "predates Hermes feed support" in out.split("Next step", 1)[1]

@@ -269,6 +269,10 @@ def doctor_report(runtime: Runtime) -> dict:
     elif not marker["present"]:
         step = (f"The feed marker is missing: check that {feed.root} is writable, then start a Hermes "
                 "session in this profile with the plugin enabled.")
+    elif isinstance(probe["board"], dict) and "hermes" not in probe["board"]:
+        step = (f"Your Omo bridge (v{probe['version']}) predates Hermes feed support, so the Hermes Board and "
+                "desk lamps stay empty even though this profile's feed is written. Update Omo Space (run its "
+                "launcher's update/repair), then check again.")
     elif last_event is None:
         step = "All set. Start a chat in this profile and it will appear on the Hermes Board in Omo Space."
     else:
