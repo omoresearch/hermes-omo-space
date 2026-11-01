@@ -67,6 +67,8 @@ def _isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(hermes_home))
     for name in ("OMO_WORKSPACE", "OMO_TAB", "OMO_HERMES_TITLE", "OMO_PORT"):
         monkeypatch.delenv(name, raising=False)
+    # The port-ownership check reads /proc/net; tests that want it point it at a fake dir.
+    monkeypatch.setattr(sys.modules[PACKAGE].tools, "PROC_NET", str(tmp_path / "no-proc-net"))
     yield hermes_home
 
 

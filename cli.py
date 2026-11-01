@@ -224,11 +224,17 @@ def doctor_report(runtime: Runtime) -> dict:
     bridge = {"url": probe["url"], "up": probe["up"], "version": probe["version"]}
     if "error" in probe:
         bridge["error"] = probe["error"]
+    if "foreign_uid" in probe:
+        bridge["foreign_uid"] = probe["foreign_uid"]
     counts = tools.board_counts(probe["board"])
 
     if probe["url"] is None:
         step = ("Fix the bridge_url setting: it must be a loopback URL such as http://127.0.0.1:8780 "
                 "(or leave it empty to use OMO_PORT / 8780).")
+    elif "foreign_uid" in probe:
+        step = (f"Port {probe['url'].rsplit(':', 1)[-1]} is another user's Omo bridge, not yours. Start your own Omo "
+                "Space and point this profile at it: set OMO_PORT, or "
+                "`hermes config set plugins.entries.omo-space.settings.bridge_url http://127.0.0.1:<port>`.")
     elif not feed.enabled:
         step = ("The feed is off. Set plugins.entries.omo-space.settings.feed: true in this profile's "
                 "config.yaml so Omo Space can see this profile.")
@@ -259,6 +265,8 @@ def doctor(runtime: Runtime, as_json: bool = False) -> int:
     elif b["up"]:
         extra = f", {r['board']['workspaces']} workspaces, {r['board']['live']} live" if r["board"] else ""
         bridge = f"reachable at {b['url']} (Omo bridge v{b['version']}{extra})"
+    elif "foreign_uid" in b:
+        bridge = f"not yours at {b['url']}: {b['error']}"
     else:
         bridge = f"not reachable at {b['url']} ({b.get('error', 'no answer')})"
     feed = f"enabled, writing to {r['feed']['dir']}" if r["feed"]["enabled"] else \

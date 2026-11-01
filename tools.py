@@ -9,6 +9,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -19,6 +20,8 @@ from .feed import Feed, sanitize_session_id
 DEFAULT_PORT = 8780
 TIMEOUT_S = 1.5
 MAX_BODY = 2 * 1024 * 1024
+PROC_NET = "/proc/net"     # Linux only; tests point this at a fake dir
+FOREIGN_HINT = "a bridge on this port belongs to another user; set bridge_url / OMO_PORT to yours"
 
 
 # --------------------------------------------------------------------------- bridge URL policy
@@ -67,6 +70,88 @@ def resolve_bridge_url(setting: Any) -> str:
     return f"http://{parts.netloc}"
 
 
+# --------------------------------------------------------------------------- port ownership (Linux)
+
+def _proc_addr(hex_addr: str) -> Optional[ipaddress._BaseAddress]:
+    """Decode a /proc/net/tcp{,6} address (host-order 32-bit words, hex) into an IP address."""
+    try:
+        raw = bytes.fromhex(hex_addr)
+    except ValueError:
+        return None
+    if len(raw) not in (4, 16):
+        return None
+    words = [raw[i:i + 4][::-1] if sys.byteorder == "little" else raw[i:i + 4] for i in range(0, len(raw), 4)]
+    try:
+        return ipaddress.ip_address(b"".join(words))
+    except ValueError:
+        return None
+
+
+def _covers(listen: ipaddress._BaseAddress, target: ipaddress._BaseAddress) -> bool:
+    """Would a socket listening on ``listen`` accept a connection to ``target``?"""
+    if isinstance(listen, ipaddress.IPv6Address) and listen.ipv4_mapped is not None:
+        listen = listen.ipv4_mapped
+    if listen.is_unspecified:
+        return listen.version == target.version or listen.version == 6  # :: also takes IPv4 (dual stack)
+    return listen == target
+
+
+def listener_uids(host: str, port: int, proc_net: Optional[str] = None) -> Optional[set]:
+    """uids owning a LISTEN socket that serves ``host:port``, read from /proc/net/tcp and tcp6.
+    ``None`` = could not tell (not Linux, /proc unreadable, nothing listening): skip the check."""
+    if proc_net is None:
+        if not sys.platform.startswith("linux"):
+            return None
+        proc_net = PROC_NET
+    targets = []
+    if host.lower() == "localhost":
+        targets = [ipaddress.ip_address("127.0.0.1"), ipaddress.ip_address("::1")]
+    else:
+        try:
+            targets = [ipaddress.ip_address(host)]
+        except ValueError:
+            return None
+    uids: set = set()
+    readable = False
+    for name in ("tcp", "tcp6"):
+        try:
+            with open(os.path.join(proc_net, name), encoding="ascii", errors="replace") as fh:
+                lines = fh.read(4 * 1024 * 1024).splitlines()[1:]
+            readable = True
+        except OSError:
+            continue
+        for line in lines:
+            cols = line.split()
+            if len(cols) < 8 or cols[3] != "0A":          # 0A = TCP_LISTEN
+                continue
+            addr, _, hport = cols[1].partition(":")
+            try:
+                if int(hport, 16) != port:
+                    continue
+                uid = int(cols[7])
+            except ValueError:
+                continue
+            listen = _proc_addr(addr)
+            if listen is not None and any(_covers(listen, t) for t in targets):
+                uids.add(uid)
+    return uids if readable and uids else None
+
+
+def foreign_listener(base: str) -> Optional[int]:
+    """The uid of another user's process listening on the bridge port, else None. Best effort."""
+    getuid = getattr(os, "getuid", None)
+    if getuid is None:
+        return None
+    try:
+        parts = urllib.parse.urlsplit(base)
+        uids = listener_uids(parts.hostname or "", parts.port or 80)
+    except Exception:  # noqa: BLE001 - this is a hint, never a failure
+        return None
+    if not uids or getuid() in uids:
+        return None
+    return min(uids)
+
+
 # --------------------------------------------------------------------------- HTTP
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -99,6 +184,12 @@ def probe_bridge(setting: Any) -> dict:
         out["error"] = f"refused (loopback only): {exc}"
         return out
     out["url"] = base
+    foreign = foreign_listener(base)
+    if foreign is not None:
+        # Another Linux user's Omo bridge: not ours to report on, and its board is not our world.
+        out["foreign_uid"] = foreign
+        out["error"] = f"{FOREIGN_HINT} (it runs as uid {foreign}, you are uid {os.getuid()})"
+        return out
     try:
         health = fetch_json(base, "/health")
     except Exception as exc:  # noqa: BLE001
@@ -188,6 +279,8 @@ def status_summary(feed: Optional[Feed], bridge_url: Any, session_id: Any = None
         bridge["tmux"] = probe["health"].get("tmux")
     if "error" in probe:
         bridge["error"] = probe["error"]
+    if "foreign_uid" in probe:
+        bridge["foreign_uid"] = probe["foreign_uid"]
     return {"bridge": bridge, "board": board_counts(probe["board"]),
             "this_session": locate_session(feed, probe["board"], session_id), "feed": feed_summary(feed)}
 

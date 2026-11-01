@@ -168,3 +168,66 @@ def test_status_through_env_proxy_still_direct(plugin, feed, fake_bridge, monkey
     monkeypatch.delenv("NO_PROXY", raising=False)
     out = json.loads(plugin.tools.omo_status({}, feed=feed, bridge_url=fake_bridge.url))
     assert out["bridge"]["up"] is True
+
+
+# ---------------------------------------------------------------- port owned by another Linux user
+
+_TCP_HEADER = ("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n")
+
+
+def _fake_proc(tmp_path, port, uid, *, v4="0100007F", v6=None, state="0A"):
+    d = tmp_path / "proc-net"
+    d.mkdir(exist_ok=True)
+    row = "  {i}: {a}:{p:04X} 00000000:0000 {st} 00000000:00000000 00:00000000 00000000  {u}        0 4435{i} 1\n"
+    (d / "tcp").write_text(_TCP_HEADER + (row.format(i=0, a=v4, p=port, st=state, u=uid) if v4 else "")
+                           + row.format(i=1, a="0100007F", p=22, st="0A", u=0))
+    (d / "tcp6").write_text(_TCP_HEADER + (row.format(i=2, a=v6, p=port, st=state, u=uid) if v6 else ""))
+    return d
+
+
+def test_listener_uids_parses_proc_net(plugin, tmp_path):
+    t = plugin.tools
+    d = _fake_proc(tmp_path, 8780, 1000)
+    assert t.listener_uids("127.0.0.1", 8780, str(d)) == {1000}
+    assert t.listener_uids("localhost", 8780, str(d)) == {1000}
+    assert t.listener_uids("127.0.0.1", 8781, str(d)) is None       # nothing listening there
+    assert t.listener_uids("::1", 8780, str(d)) is None              # v4-only listener
+    d6 = _fake_proc(tmp_path, 9000, 1234, v4=None, v6="00000000000000000000000001000000")
+    assert t.listener_uids("::1", 9000, str(d6)) == {1234}
+    dany = _fake_proc(tmp_path, 9001, 77, v4="00000000")               # 0.0.0.0 also serves loopback
+    assert t.listener_uids("127.0.0.1", 9001, str(dany)) == {77}
+    dconn = _fake_proc(tmp_path, 9002, 77, state="01")                # ESTABLISHED, not LISTEN
+    assert t.listener_uids("127.0.0.1", 9002, str(dconn)) is None
+    assert t.listener_uids("127.0.0.1", 8780, str(tmp_path / "missing")) is None
+
+
+def test_foreign_bridge_is_not_reported_as_reachable(plugin, feed, fake_bridge, tmp_path, monkeypatch):
+    import os
+    port = int(fake_bridge.url.rsplit(":", 1)[1])
+    monkeypatch.setattr(plugin.tools, "PROC_NET", str(_fake_proc(tmp_path, port, os.getuid() + 1)))
+    monkeypatch.setattr(plugin.tools.sys, "platform", "linux")
+    out = json.loads(plugin.tools.omo_status({}, feed=feed, bridge_url=fake_bridge.url))
+    assert out["bridge"]["up"] is False and out["board"] is None
+    assert out["bridge"]["foreign_uid"] == os.getuid() + 1
+    assert "belongs to another user" in out["bridge"]["error"] and "OMO_PORT" in out["bridge"]["error"]
+    assert fake_bridge.hits == []                                     # its board was never fetched
+
+
+def test_own_bridge_passes_the_owner_check(plugin, feed, fake_bridge, tmp_path, monkeypatch):
+    import os
+    port = int(fake_bridge.url.rsplit(":", 1)[1])
+    monkeypatch.setattr(plugin.tools, "PROC_NET", str(_fake_proc(tmp_path, port, os.getuid())))
+    monkeypatch.setattr(plugin.tools.sys, "platform", "linux")
+    out = json.loads(plugin.tools.omo_status({}, feed=feed, bridge_url=fake_bridge.url))
+    assert out["bridge"]["up"] is True and "foreign_uid" not in out["bridge"]
+
+
+def test_owner_check_skipped_off_linux_or_without_proc(plugin, feed, fake_bridge, tmp_path, monkeypatch):
+    import os
+    port = int(fake_bridge.url.rsplit(":", 1)[1])
+    monkeypatch.setattr(plugin.tools, "PROC_NET", str(_fake_proc(tmp_path, port, os.getuid() + 1)))
+    monkeypatch.setattr(plugin.tools.sys, "platform", "darwin")
+    assert json.loads(plugin.tools.omo_status({}, feed=feed, bridge_url=fake_bridge.url))["bridge"]["up"] is True
+    monkeypatch.setattr(plugin.tools.sys, "platform", "linux")
+    monkeypatch.setattr(plugin.tools, "PROC_NET", str(tmp_path / "unreadable"))
+    assert json.loads(plugin.tools.omo_status({}, feed=feed, bridge_url=fake_bridge.url))["bridge"]["up"] is True

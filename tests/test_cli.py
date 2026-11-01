@@ -158,3 +158,21 @@ def test_no_subcommand_prints_usage(plugin, tmp_path, monkeypatch, capsys):
     rt = _runtime(plugin, tmp_path)
     _run(plugin, rt, ["omo"], monkeypatch)
     assert "status" in capsys.readouterr().out
+
+
+def test_status_foreign_bridge_next_step(plugin, tmp_path, fake_bridge, monkeypatch, capsys):
+    import os
+    port = int(fake_bridge.url.rsplit(":", 1)[1])
+    d = tmp_path / "proc-net"
+    d.mkdir()
+    (d / "tcp").write_text("  sl local_address rem_address st tx rx tr tm retr uid\n"
+                           f"   0: 0100007F:{port:04X} 00000000:0000 0A 00000000:00000000 00:00000000 00000000"
+                           f"  {os.getuid() + 1}        0 1 1\n")
+    monkeypatch.setattr(plugin.tools, "PROC_NET", str(d))
+    monkeypatch.setattr(plugin.tools.sys, "platform", "linux")
+    rt = _runtime(plugin, tmp_path, bridge_url=fake_bridge.url)
+    assert _run(plugin, rt, ["omo", "status"], monkeypatch) == 0
+    out = capsys.readouterr().out
+    assert "reachable at" not in out and "another user" in out
+    assert "Next step:" in out and "OMO_PORT" in out and "bridge_url" in out
+    assert fake_bridge.hits == []

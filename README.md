@@ -24,7 +24,15 @@ The plugin adds four things:
 - **Network:** only plain-HTTP `GET /health` and `GET /board.json` to the Omo bridge on a
   **loopback** address (`127.0.0.1`, `localhost`, `::1`). Timeout 1.5 s. Environment proxies are
   ignored and redirects are refused, so nothing leaves the machine. A non-loopback `bridge_url`
-  is refused. Hooks never touch the network.
+  is refused. Hooks never touch the network. On Linux, before probing, the plugin reads
+  `/proc/net/tcp` and `/proc/net/tcp6` to check that the process listening on the bridge port belongs
+  to you; if another user's Omo bridge owns the port it is reported as "not yours" and never queried.
+- **Reads outside its own dir:** `hermes omo status` lists which profiles have an omo-space feed
+  (globbing `<root>/profiles/*/plugin-data/*/feed/omo-feed.json`). `hermes omo world` (only when you
+  run it) reads, for every profile under your Hermes root: `profile.yaml` (display name/description),
+  `config.yaml` (only model name/provider, enabled platform names and enabled plugin names are kept),
+  `cron/jobs.json` (job count only), plugin dir names and SKILL.md file names (never opened). It never
+  opens `.env`, `auth.json`, `state.db`, logs or session files.
 - **Writes:** only its own profile-scoped dir, `<HERMES_HOME>/plugin-data/<namespace>/feed/`
   (dir `0700`, files `0600`). `hermes omo world` writes only to the output path you give it.
 - **Records metadata only:** event kinds, tool *names*, counters, durations, timestamps, model and
@@ -46,6 +54,10 @@ Set these in `plugins.entries.omo-space.settings` (the Desktop settings form sho
 |---|---|---|---|
 | `feed` | bool | `true` | Write the activity feed. |
 | `bridge_url` | str | `""` | Empty means `http://127.0.0.1:$OMO_PORT`, or `8780` if `OMO_PORT` is unset. Loopback only. |
+
+Settings are read live: a `hermes config set plugins.entries.omo-space.settings.<key> ...` takes
+effect on the next tool call, `/omo` or `hermes omo` run (hooks pick up `feed` /
+`notify_on_finish` within 5 s), without restarting a long-lived plugin host.
 | `notify_on_finish` | bool | `false` | Queue a toast when a turn that took more than 60 s ends. |
 
 ## Feed format (v1)

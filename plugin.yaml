@@ -12,7 +12,10 @@ description: >
   which the Omo bridge reads to light desks and fill the Hermes Board. Adds the omo_status and
   omo_notify tools (toolset omo), a /omo slash command and `hermes omo status|feed|world`.
   Network: only loopback HTTP GETs to the local Omo bridge (/health, /board.json); nothing leaves the
-  machine. Writes only its own plugin-data dir (and, for `hermes omo world`, the output path you pass).
+  machine. On Linux it reads /proc/net/tcp{,6} to skip a bridge port owned by another user.
+  Writes only its own plugin-data dir (and, for `hermes omo world`, the output path you pass).
+  `hermes omo world` reads every profile's profile.yaml, config.yaml (model, platform and plugin names
+  only), cron/jobs.json (count) and skill/plugin dir names under your Hermes root.
   Reads no secrets, starts no background processes, never approves or blocks tools.
 requires_hermes: ">=0.22.5"
 tags: [omo, minecraft, observability, dashboard]

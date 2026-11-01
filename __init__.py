@@ -94,6 +94,8 @@ def _slash_text(feed: Feed, bridge_url: Any, session_id: Any) -> str:
     elif b["up"]:
         extra = f", {counts['workspaces']} workspaces, {counts['live']} live" if counts else ""
         bridge = f"Omo Space bridge is reachable at {b['url']} (v{b['version']}{extra})."
+    elif "foreign_uid" in b:
+        bridge = f"The Omo Space bridge at {b['url']} is not yours: {b['error']}."
     else:
         bridge = f"Omo Space bridge is not reachable at {b['url']}."
     if here["where"] == "in-world":
