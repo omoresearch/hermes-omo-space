@@ -195,3 +195,41 @@ def test_slash_command_reads_workspace_from_session_presence(plugin, fake_ctx_cl
 def test_init_does_not_import_worldgen_eagerly(plugin):
     src = (ROOT / "__init__.py").read_text()
     assert "worldgen" not in src
+
+
+# ---------------------------------------------------------------- settings are live, not frozen
+
+def test_bridge_url_setting_is_read_per_call(plugin, fake_ctx_cls, tmp_path, fake_bridge, monkeypatch):
+    """Regression: the plugin host can outlive `hermes config set`; the tool, /omo and the CLI must
+    use the bridge_url that is configured NOW, not the one seen at register()."""
+    ctx = fake_ctx_cls(data_dir=tmp_path / "pd", settings={"bridge_url": "http://127.0.0.1:1"})
+    plugin.register(ctx)
+    status = next(t for t in ctx.tools if t["name"] == "omo_status")
+    assert json.loads(status["handler"]({}))["bridge"]["url"] == "http://127.0.0.1:1"
+    ctx._settings["bridge_url"] = fake_bridge.url          # `hermes config set` after register
+    out = json.loads(status["handler"]({}))
+    assert out["bridge"]["url"] == fake_bridge.url and out["bridge"]["up"] is True
+    assert fake_bridge.url in ctx.commands[0]["handler"]("")
+    seen = []
+    monkeypatch.setattr(plugin.cli, "run", lambda args, rt: seen.append(rt.bridge_url_setting) or 0)
+    ctx.cli[0]["handler_fn"](object())
+    assert seen == [fake_bridge.url]
+
+
+def test_feed_setting_is_live(plugin, fake_ctx_cls, tmp_path, monkeypatch):
+    ctx = fake_ctx_cls(data_dir=tmp_path / "pd", settings={"feed": False})
+    plugin.register(ctx)
+    monkeypatch.setattr(plugin.feed, "SETTINGS_TTL_S", 0.0)
+    notify = next(t for t in ctx.tools if t["name"] == "omo_notify")
+    assert notify["check_fn"]() is False
+    ctx._settings["feed"] = True                            # switched on after register
+    start = ctx.hook("on_session_start")[0]
+    start(session_id="s1", platform="cli")
+    feed_dir = tmp_path / "pd" / "feed"
+    assert (feed_dir / "omo-feed.json").exists() and (feed_dir / "sessions" / "s1.json").exists()
+    assert notify["check_fn"]() is True
+    ctx._settings["feed"] = False                           # and off again
+    before = (feed_dir / "events.jsonl").read_text()
+    start(session_id="s2", platform="cli")
+    assert (feed_dir / "events.jsonl").read_text() == before
+    assert json.loads(notify["handler"]({"text": "hi"}))["queued"] is False

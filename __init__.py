@@ -118,11 +118,22 @@ def register(ctx: Any) -> None:
     global _FEED
     enabled = _as_bool(_setting(ctx, "feed", True), True)
     notify_on_finish = _as_bool(_setting(ctx, "notify_on_finish", False), False)
-    bridge_url = _setting(ctx, "bridge_url", "")
     profile = _profile(ctx)
     feed = Feed(_data_dir(ctx) / "feed", profile=profile, plugin_version=__version__, enabled=enabled,
                 notify_on_finish=notify_on_finish)
     _FEED = feed
+
+    # Settings are read per call, never captured: the plugin host may be long-lived (started at
+    # `plugins enable`) and must see a later `hermes config set plugins.entries.omo-space.settings...`.
+    def bridge_url() -> Any:
+        return _setting(ctx, "bridge_url", "")
+
+    def live_settings() -> dict:
+        return {"feed": _as_bool(_setting(ctx, "feed", feed.enabled), feed.enabled),
+                "notify_on_finish": _as_bool(_setting(ctx, "notify_on_finish", feed.notify_on_finish),
+                                             feed.notify_on_finish)}
+
+    feed.settings_fn = live_settings
     if enabled and not feed.write_marker():
         logger.warning("omo-space: feed dir %s is not writable (%s); hooks will stay silent",
                        feed.root, feed.last_error)
@@ -131,12 +142,15 @@ def register(ctx: Any) -> None:
         ctx.register_hook(name, callback)
 
     def omo_status(args: Any = None, **kwargs: Any) -> str:
-        return tools.omo_status(args, feed=feed, bridge_url=bridge_url, **kwargs)
+        feed.refresh_settings(force=True)
+        return tools.omo_status(args, feed=feed, bridge_url=bridge_url(), **kwargs)
 
     def omo_notify(args: Any = None, **kwargs: Any) -> str:
+        feed.refresh_settings(force=True)
         return tools.omo_notify(args, feed=feed, **kwargs)
 
     def notify_available() -> bool:
+        feed.refresh_settings()
         return feed.enabled
 
     ctx.register_tool(name="omo_status", toolset="omo", schema=schemas.OMO_STATUS, handler=omo_status,
@@ -146,16 +160,19 @@ def register(ctx: Any) -> None:
 
     def slash_omo(raw_args: str = "", **kwargs: Any) -> str:
         try:
-            return _slash_text(feed, bridge_url, kwargs.get("session_id"))
+            feed.refresh_settings(force=True)
+            return _slash_text(feed, bridge_url(), kwargs.get("session_id"))
         except Exception as exc:  # noqa: BLE001
             return f"omo-space: status unavailable ({type(exc).__name__})."
 
     ctx.register_command("omo", handler=slash_omo,
                          description="Where this conversation lives in Omo Space, and whether the bridge is up")
 
-    runtime = cli.Runtime(feed=feed, bridge_url_setting=bridge_url, profile=profile)
+    runtime = cli.Runtime(feed=feed, bridge_url_setting=bridge_url(), profile=profile)
 
     def handle_cli(args: Any) -> int:
+        feed.refresh_settings(force=True)
+        runtime.bridge_url_setting = bridge_url()
         return cli.run(args, runtime)
 
     ctx.register_cli_command(name="omo", help="Omo Space: doctor, activity feed, Hermes HQ world",

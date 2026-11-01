@@ -45,6 +45,7 @@ THROTTLE_S = 0.25          # <= 4 presence writes / s / session unless the state
 PRUNE_EVERY_S = 60.0
 BACKOFF_S = 30.0
 LONG_TURN_S = 60.0
+SETTINGS_TTL_S = 5.0       # hooks re-read the feed/notify_on_finish settings at most this often
 NOTIFY_MAX = 140
 LEVELS = ("info", "success", "warn")
 KINDS = frozenset({
@@ -150,6 +151,37 @@ class Feed:
         self.presence_writes = 0
         self.events_written = 0
         self.last_error: Optional[str] = None
+        # Optional live settings source: () -> {"feed": bool, "notify_on_finish": bool}. The plugin
+        # host can outlive a `hermes config set`, so settings are re-read (throttled) instead of
+        # being frozen at register time.
+        self.settings_fn: Optional[Callable[[], dict]] = None
+        self._settings_at: Optional[float] = None
+
+    # ------------------------------------------------------------------ live settings
+    def refresh_settings(self, force: bool = False) -> None:
+        """Re-read ``feed`` / ``notify_on_finish`` from ``settings_fn`` (at most every
+        ``SETTINGS_TTL_S`` unless ``force``). Never raises; a failing source keeps the old values."""
+        fn = self.settings_fn
+        if fn is None:
+            return
+        now = time.monotonic()
+        if not force and self._settings_at is not None and now - self._settings_at < SETTINGS_TTL_S:
+            return
+        self._settings_at = now
+        try:
+            values = fn()
+        except Exception:  # noqa: BLE001 - unreadable config must not change behaviour
+            return
+        if not isinstance(values, dict):
+            return
+        was = self.enabled
+        if isinstance(values.get("feed"), bool):
+            self.enabled = values["feed"]
+        if isinstance(values.get("notify_on_finish"), bool):
+            self.notify_on_finish = values["notify_on_finish"]
+        if self.enabled and not was:
+            self._broken_until = 0.0
+            self.write_marker()  # switched on at runtime: make the feed discoverable now
 
     # ------------------------------------------------------------------ filesystem primitives
     @property
@@ -495,6 +527,10 @@ class Feed:
         feed = self
 
         def hook(*_args: Any, **kwargs: Any) -> None:
+            try:
+                feed.refresh_settings()
+            except Exception:  # noqa: BLE001
+                pass
             if not feed.enabled:
                 return None
             try:
