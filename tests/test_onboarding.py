@@ -401,3 +401,24 @@ def test_setup_reports_missing_omo(plugin, hermes_home, tmp_path, monkeypatch):
                                    interactive=False, runner=_no_run) == 0
     text = out.getvalue()
     assert "install Omo Space first" in text and "Omo bridge not found" in text
+
+
+def test_setup_keeps_a_working_configured_bridge(plugin, hermes_home, tmp_path, monkeypatch, fake_bridge):
+    """The profile points at a reachable bridge of ours on another port: no `config set` is suggested."""
+    _setup_env(plugin, hermes_home, tmp_path, monkeypatch)
+    monkeypatch.setattr(plugin.onboarding, "detect_bridge", lambda: {
+        "port": 1, "source": "OMO_PORT", "version": "x", "foreign": [], "checked": [1], "owner": None})
+    r = plugin.onboarding.setup_report(_runtime(plugin, tmp_path, bridge_url=fake_bridge.url))
+    assert r["current_bridge_ok"] is True and r["set_bridge_cmds"] == []
+    out = io.StringIO()
+    plugin.onboarding.print_checklist(r, out)
+    assert "reachable, yours" in out.getvalue() and "config set" not in out.getvalue()
+
+
+def test_setup_suggests_bridge_url_when_configured_one_is_dead(plugin, hermes_home, tmp_path, monkeypatch,
+                                                              fake_bridge):
+    _setup_env(plugin, hermes_home, tmp_path, monkeypatch, fake_bridge)
+    r = plugin.onboarding.setup_report(_runtime(plugin, tmp_path, bridge_url="http://127.0.0.1:1"))
+    assert r["current_bridge_ok"] is False
+    assert r["set_bridge_cmds"] == [["hermes", "-p", "default", "config", "set",
+                                     "plugins.entries.omo-space.settings.bridge_url", fake_bridge.url]]

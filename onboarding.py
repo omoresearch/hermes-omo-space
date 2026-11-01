@@ -315,12 +315,16 @@ def _owner(port: int, platform: Optional[str] = None) -> Optional[str]:
     return "mine" if getuid() in uids else "foreign"
 
 
-def _health(port: int) -> Optional[dict]:
+def _health_url(base: str) -> Optional[dict]:
     try:
-        data = tools.fetch_json(f"http://127.0.0.1:{port}", "/health")
+        data = tools.fetch_json(tools.resolve_bridge_url(base), "/health")
     except Exception:  # noqa: BLE001
         return None
-    return data if isinstance(data, dict) else None
+    return data if isinstance(data, dict) and data.get("ok", True) else None
+
+
+def _health(port: int) -> Optional[dict]:
+    return _health_url(f"http://127.0.0.1:{port}")
 
 
 def detect_bridge(env: Optional[Mapping[str, str]] = None, platform: Optional[str] = None, home: Optional[Path] = None,
@@ -397,14 +401,21 @@ def setup_report(runtime: Any) -> dict:
     except ValueError:
         current = None
     url = f"http://127.0.0.1:{bridge['port']}" if bridge["port"] else None
+    current_ok = False
+    if current and url and current != url:
+        # The profile already points at another bridge: keep it if that one is ours and answers.
+        import urllib.parse
+        port = urllib.parse.urlsplit(current).port or 80
+        current_ok = _owner(port) != "foreign" and (_health_url(current) is not None)
     set_cmds = []
-    if url and url != current:
+    if url and url != current and not current_ok:
         set_cmds.append(["hermes", "-p", runtime.profile, "config", "set",
                          f"plugins.entries.{PLUGIN_KEY}.settings.bridge_url", url])
     profiles = profiles_report(root)
     saves = saves_dir()
     return {"profile": runtime.profile, "hermes_root": str(root), "omo_data": str(data),
             "omo_data_exists": data.is_dir(), "bridge": bridge, "bridge_url": url, "current_bridge_url": current,
+            "current_bridge_ok": current_ok,
             "set_bridge_cmds": set_cmds, "profiles": profiles, "enable_cmds": enable_commands(profiles),
             "saves": str(saves), "worlds": list_worlds(saves)}
 
@@ -427,7 +438,10 @@ def print_checklist(r: dict, out) -> None:
                     "open Omo Space (or start its bridge) and run this again")
     for f in b["foreign"]:
         line(None, f"port {f['port']} belongs to another user's Omo bridge; ignored")
-    if r["set_bridge_cmds"]:
+    if r.get("current_bridge_ok"):
+        line(True, f"this profile uses the bridge at {r['current_bridge_url']} (reachable, yours); "
+                   f"the launcher's bridge is {r['bridge_url']}")
+    elif r["set_bridge_cmds"]:
         line(False, f"this profile looks for the bridge at {r['current_bridge_url']}, not {r['bridge_url']}")
     elif r["bridge_url"]:
         line(True, f"this profile's bridge_url resolves to {r['current_bridge_url']}")
