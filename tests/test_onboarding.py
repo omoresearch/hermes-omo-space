@@ -321,6 +321,7 @@ def test_setup_non_interactive_prints_checklist_and_never_prompts(plugin, hermes
     assert f"plugins.entries.omo-space.settings.bridge_url {fake_bridge.url}" in text
     assert 'hermes omo world --install "Omo World"' in text
     assert "needs an interactive terminal" in text
+    assert "right-click each desk once" in text
 
 
 def test_setup_without_tty_is_the_default_under_pytest(plugin, hermes_home, tmp_path, monkeypatch):

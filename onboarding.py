@@ -129,6 +129,7 @@ def reload_instructions(namespace: str) -> str:
             f"  stand in an open, flat area, then\n"
             f"  /function {namespace}:preview    (particle outline only)\n"
             f"  /function {namespace}:build\n"
+            f"  right-click each desk's Omo Computer once to open its workspace\n"
             f"  /function {namespace}:clear      (removes it again)")
 
 
@@ -492,7 +493,8 @@ def print_checklist(r: dict, out) -> None:
     if worlds and not any(w["installed"] for w in worlds):
         target = worlds[0]["name"] if len(worlds) == 1 else "<World>"
         steps.append(_shell(["hermes", "omo", "world", "--install", target]))
-        steps.append("then in game: /reload, /function hermes_hq:preview, /function hermes_hq:build")
+        steps.append("then in game: /reload, /function hermes_hq:preview, /function hermes_hq:build, "
+                     "and right-click each desk once to open it")
     if steps:
         print("Next steps (copy and run; `hermes omo setup --enable-all` runs the enable commands after a prompt):",
               file=out)
