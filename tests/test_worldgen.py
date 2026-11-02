@@ -188,66 +188,263 @@ def test_sanitize_and_json_text():
     assert j.isascii()
 
 
-# --------------------------------------------------------------------------- layout
-@pytest.mark.parametrize("n", [1, 2, 3, 5, 12, 46, 48, 96])
+# --------------------------------------------------------------------------- layout (v2: cavern hall)
+REAL_NAMES = (["default"] + [f"0{i}-studio-{i}" for i in range(1, 7)] + [f"lf-0{i}-x" for i in range(1, 9)]
+              + [f"omo-{i:02d}-x" for i in range(1, 30)] + [f"yt-0{i}-x" for i in range(1, 5)])   # 47 like the user's
+assert len(REAL_NAMES) == 48
+
+
+def _kit_world(d, t):
+    """A template cell (tx, ty, tz) of desk d in world coordinates (place template rotation)."""
+    X, Y, Z = d["template_pos"]
+    dx, dz = lay.rot_xz(d["rotation"], t[0], t[2])
+    return [X + dx, Y + t[1], Z + dz]
+
+
+@pytest.mark.parametrize("n", [1, 2, 3, 4, 5, 7, 12, 46, 47, 48, 96])
 def test_layout_no_overlap_and_inside(n):
-    L = lay.plan_layout(n)
-    assert len(L["desks"]) == n
+    L = lay.plan_layout(n, REAL_NAMES[:n] if n <= 48 else None)
+    assert len(L["desks"]) == n and [d["index"] for d in L["desks"]] == list(range(n))
     h = L["hall"]
-    cells = set()
+    seen = {}
     for d in L["desks"]:
-        fp = {(x, z) for x in range(d["x0"], d["x0"] + lay.DESK_W) for z in (d["zf"], d["zf"] + 1)}
-        assert not (fp & cells), "desks overlap"
-        # keep a clear walkway in front of every desk
-        front = {(x, d["zf"] - 1) for x in range(d["x0"], d["x0"] + lay.DESK_W)}
-        assert not (front & cells)
-        cells |= fp
-        for x, z in fp:
-            assert h["x0"] < x < h["x1"] and h["z0"] < z < h["z1"]
-    b = L["board"]
-    assert h["x0"] < b["x0"] and b["x0"] + b["w"] - 1 < h["x1"]
-    assert b["z"] == h["z1"]
-    # the central aisle (door to board) is free
-    for z in range(h["z0"] + 1, h["z1"]):
-        assert (0, z) not in cells
-    # desks are at least 4 apart so each status lamp follows its own station
-    st = [(d["station"][0], d["station"][2]) for d in L["desks"]]
-    for i, a in enumerate(st):
-        for c in st[i + 1:]:
-            assert abs(a[0] - c[0]) + abs(a[1] - c[1]) >= 5
+        assert len(d["cells"]) == lay.KIT_W * lay.KIT_H * lay.KIT_D
+        for c in d["cells"]:
+            assert tuple(c) not in seen, ("kits overlap", d["index"], seen.get(tuple(c)))
+            seen[tuple(c)] = d["index"]
+            assert h["x0"] < c[0] < h["x1"] and h["z0"] < c[2] < h["z1"] and 0 <= c[1] < lay.KIT_H
+        # the template maps the way `place template` does: computer in the frame row, monitors above it
+        assert _kit_world(d, (lay.KIT_MID, 0, 0)) == d["station"]
+        assert _kit_world(d, (lay.KIT_MID, 0, 1)) == d["front"]
+        assert [d["station"][0], 1, d["station"][2]] in d["monitors"]
+        assert tuple(d["facing"]) in lay.ROTATIONS and lay.ROTATIONS[tuple(d["facing"])] == d["rotation"]
+        assert d["front"] == [d["station"][0] + d["facing"][0], 0, d["station"][2] + d["facing"][1]]
+    for b in L["bays"]:
+        assert 1 <= len(b["desks"]) <= lay.BAY_CAP
+    assert sorted(i for b in L["bays"] for i in b["desks"]) == list(range(n))
+    # the player's own spot and everything north of the facade stay untouched
+    assert h["z0"] == 1
+    # web walls on screen: the Board only (client keeps 12 pages); every monitor wall within the 16 x 12 limit
+    assert L["board"]["monitor_w"] <= 16 and L["board"]["monitor_h"] <= 12
+    assert lay.SCREEN_W <= 16 and lay.SCREEN_H <= 12
 
 
-@pytest.mark.parametrize("n", [1, 2, 3, 4, 6, 7, 12, 47, 96])
+def test_layout_scales_and_stays_compact():
+    sizes = {n: lay.plan_layout(n, REAL_NAMES[:n] if n <= 48 else None)["size"] for n in (1, 4, 12, 47, 96)}
+    assert sizes[1][0] <= 50 and sizes[1][2] <= 70
+    w, _, d = sizes[47]
+    assert w <= 100 and d <= 100, sizes[47]                 # a place, not a warehouse
+    assert sizes[96][0] * sizes[96][2] <= 2.2 * w * d
+    assert all(s[1] <= 40 for s in sizes.values())
+
+
+def test_groups_make_neighbourhoods():
+    names = ["default"] + [f"omo-{i:02d}" for i in range(14)] + ["yt-1", "yt-2", "yt-3", "lf-a", "solo-x", "07-misc"]
+    L = lay.plan_layout(len(names), names)
+    by = {}
+    for b in L["bays"]:
+        by.setdefault(b["group"], []).append(b)
+    assert set(by) == {"omo", "yt", "misc"}
+    assert len(by["omo"]) == 2 and sorted(len(b["desks"]) for b in by["omo"]) == [7, 7]
+    assert len({b["theme"] for b in by["omo"]}) == 1                  # one neighbourhood, one theme
+    assert len({by[k][0]["theme"] for k in by}) == 3                  # neighbourhoods look different
+    misc = {names[i] for b in by["misc"] for i in b["desks"]}
+    assert misc == {"default", "lf-a", "solo-x", "07-misc"}
+    # neighbourhood bays sit next to each other along the loop
+    order = [b["group"] for b in L["bays"]]
+    assert order.index("omo") + 1 == len(order) - order[::-1].index("omo") - 1 or order.count("omo") == 1
+    assert lay.group_of("Omo_x") == "omo" and lay.group_of("01-x") == "" and lay.group_of("a-b") == ""
+
+
+@pytest.mark.parametrize("n", [1, 2, 3, 4, 6, 7, 10, 12, 47, 96])
 def test_plate_and_lamp_follow_their_own_station(n):
     """omolife's unlinked Name Plate / Status Lamp follow the NEAREST station block within 8 blocks
     (StatusBlockEntity.station(): BlockPos.distSqr, REACH 8). The templates place them unlinked, so in the
-    built hall (templates rotated 180) every plate and lamp must be strictly nearer its own desk's computer
-    than any other desk's (seen in the e2e rig: they carry no OmoLink, only their position decides)."""
+    built hall every plate and lamp must be strictly nearer its own desk's computer than any other desk's."""
     REACH = 8
-    L = lay.plan_layout(n)
+    L = lay.plan_layout(n, REAL_NAMES[:n] if n <= 48 else None)
     profile = {"name": "p", "label": "", "model": "", "skills": 0, "cron_jobs": 0, "platforms": [], "plugins": 0}
     cells = dp.desk_template(profile).cells
+
     def find(prefix):
         return [pos for pos, (spec, _) in cells.items() if spec.startswith(prefix)]
     (st_t,), (plate_t,), (lamp_t,) = find("omolife:hermes_computer"), find("omolife:name_plate"), \
         find("omolife:status_lamp")
-
-    def world(desk, p):   # `place template ... 180`: (x, y, z) -> (X - x, Y + y, Z - z)
-        X, Y, Z = desk["template_pos"]
-        return (X - p[0], Y + p[1], Z - p[2])
-
-    stations = [world(d, st_t) for d in L["desks"]]
-    assert [s for s in stations] == [tuple(d["station"]) for d in L["desks"]]
+    assert (st_t, plate_t, lamp_t) == ((lay.KIT_MID, 0, 0), lay.PLATE_T, lay.LAMP_T)
+    stations = [tuple(_kit_world(d, st_t)) for d in L["desks"]]
+    assert stations == [tuple(d["station"]) for d in L["desks"]]
     for i, d in enumerate(L["desks"]):
-        for follower in (world(d, plate_t), world(d, lamp_t)):
+        assert _kit_world(d, plate_t) == d["plate"] and _kit_world(d, lamp_t) == d["lamp"]
+        for follower in (d["plate"], d["lamp"]):
             dist = sorted((sum((a - b) ** 2 for a, b in zip(follower, s)), j) for j, s in enumerate(stations))
             assert dist[0][1] == i and dist[0][0] <= REACH * REACH, (i, follower, dist[:2])
             assert len(dist) == 1 or dist[1][0] > dist[0][0], ("tie", i, follower, dist[:2])
 
 
+# --------------------------------------------------------------------------- hall model
+SOLIDISH_NOT = ("air", "water", "light", "lantern", "iron_chain", "cave_vines", "cave_vines_plant", "spore_blossom",
+                "glow_lichen", "amethyst_cluster", "moss_carpet", "short_grass", "fern", "azalea", "flowering_azalea",
+                "firefly_bush", "pink_petals", "lily_pad", "seagrass", "sea_pickle")
+
+
+def _nm(s):
+    return s.split("[")[0].split("{")[0].split(":")[-1]
+
+
+def _solid(s):
+    n = _nm(s)
+    return not (n in SOLIDISH_NOT or n.endswith("_carpet") or n.endswith("_sign"))
+
+
+_HALLS = {}
+
+
+def _hall(n):
+    if n not in _HALLS:
+        L = lay.plan_layout(n, REAL_NAMES[:n] if n <= 48 else None)
+        _HALLS[n] = worldgen.hall.Hall(L)
+    return _HALLS[n]
+
+
+def _world(hl):
+    w = dict(hl.cells)
+    w.update({c: "minecraft:" + s if ":" not in s.split("[")[0] else s for c, s in hl.world_templates().items()})
+    return w
+
+
+@pytest.mark.parametrize("n", [1, 4, 47, 96])
+def test_hall_model_is_inside_and_leaves_the_player_alone(n):
+    hl = _hall(n)
+    h = hl.lay["hall"]
+    for (x, y, z) in list(hl.cells) + list(hl.world_templates()):
+        assert h["x0"] <= x <= h["x1"] and h["y0"] <= y <= h["y1"] and h["z0"] <= z <= h["z1"], (x, y, z)
+    assert not any(z < 1 for (_, _, z) in hl.cells)
+    # arch open, facade carries the glowing HERMES letters
+    for x in range(-2, 3):
+        for y in range(0, 4):
+            assert hl.cells[(x, y, 1)] == "minecraft:air" and hl.cells[(x, y, 2)] == "minecraft:air"
+    letters = [c for c, s in hl.cells.items() if c[2] == 1 and _nm(s) == "ochre_froglight"]
+    assert len(letters) >= 40
+    assert any(_nm(s) == "gold_block" for c, s in hl.cells.items() if c[2] == 1)
+
+
+@pytest.mark.parametrize("n", [1, 4, 47, 96])
+def test_hall_walkway_reaches_every_desk(n):
+    """Walk from the arch on floor cells (air at y 0 and 1 over a solid floor, no water): every desk's front is
+    reachable and close; the Board is visible straight ahead of the foyer."""
+    hl = _hall(n)
+    w = _world(hl)
+
+    def walk(x, z):
+        a, b, f = w.get((x, 0, z)), w.get((x, 1, z)), w.get((x, -1, z))
+        if a is None or b is None or f is None:
+            return False
+        if not _solid(f):
+            return False
+        ok0 = not _solid(a) and _nm(a) not in ("water",)
+        return ok0 and not _solid(b)
+    start = (0, 2)
+    assert walk(*start)
+    dist = {start: 0}
+    q = [start]
+    for c in q:
+        for a, b in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nb = (c[0] + a, c[1] + b)
+            if nb not in dist and walk(*nb):
+                dist[nb] = dist[c] + 1
+                q.append(nb)
+    far = 0
+    for d in hl.lay["desks"]:
+        sx, _, sz = d["station"]
+        fx, fz = d["facing"]
+        stand = (sx + 2 * fx, sz + 2 * fz)          # in front of the open desk cell
+        assert stand in dist, ("desk not reachable", d["index"], d["name"], stand)
+        far = max(far, dist[stand])
+        assert w[tuple(d["front"])] == "minecraft:air"           # the cell in front of the computer is open
+    limit = {1: 70, 4: 70, 47: 110, 96: 160}[n]
+    assert far <= limit, far
+    # Board monitors face the foyer across the front walkway
+    for m in hl.lay["board"]["monitors"]:
+        assert _nm(w[tuple(m)]) == "monitor"
+        assert w[(m[0], m[1], m[2] - 1)] in ("minecraft:air",) or not _solid(w[(m[0], m[1], m[2] - 1)])
+
+
+@pytest.mark.parametrize("n", [1, 4, 47, 96])
+def test_shell_is_closed(n):
+    """Every open cell (air inside the hall) has all 6 neighbours set by the build (or a template), except the
+    arch's outward side: the hall never opens into whatever terrain or caves surround it."""
+    hl = _hall(n)
+    mine = set(hl.cells) | set(hl.tplbox)
+    for c in hl.opencells:
+        for d in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)):
+            nb = (c[0] + d[0], c[1] + d[1], c[2] + d[2])
+            assert nb in mine or (nb[2] == 0 and c[2] == 1 and -2 <= c[0] <= 2), ("open to the outside", c, nb)
+
+
+@pytest.mark.parametrize("n", [4, 47])
+def test_water_is_sealed_and_decor_is_supported(n):
+    hl = _hall(n)
+    w = _world(hl)
+    falls = {(fx, fz) for fx, fz in hl.lay["crag"]["falls"]}
+    for (x, y, z), s in w.items():
+        if _nm(s) != "water":
+            continue
+        below = w.get((x, y - 1, z))
+        assert below and (_solid(below) or _nm(below) in ("water", "seagrass", "sea_pickle")), ("pond leaks down", x, y, z)
+        for a, b in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nb = w.get((x + a, y, z + b))
+            if y == hl.lay["crag"]["fall_top"] and (x + a, z + b) in falls:
+                continue                                    # the waterfall spills out of its notch here
+            assert nb and (_solid(nb) or _nm(nb) in ("water", "seagrass", "sea_pickle")), ("pond leaks", x, y, z, nb)
+        for a, b, c in ((1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, -1, 0)):
+            assert (x + a, y + b, z + c) not in hl.tplbox
+    for (x, y, z), s in w.items():
+        n_ = _nm(s)
+        if n_ == "lantern" and "hanging=true" in s:
+            up = w.get((x, y + 1, z))
+            assert up and (_solid(up) or _nm(up) == "iron_chain"), ("lantern hangs from nothing", x, y, z, up)
+        elif n_ == "lantern" or n_ in ("short_grass", "fern", "azalea", "flowering_azalea", "moss_carpet",
+                                       "firefly_bush", "pink_petals") or n_.endswith("_carpet"):
+            assert _solid(w.get((x, y - 1, z), "minecraft:air")), ("floats", n_, x, y, z)
+        elif n_ in ("cave_vines", "cave_vines_plant", "iron_chain", "spore_blossom"):
+            up = w.get((x, y + 1, z))
+            assert up and (_solid(up) or _nm(up) in ("cave_vines_plant", "iron_chain")), (n_, x, y, z, up)
+        elif n_ == "lily_pad":
+            assert _nm(w[(x, y - 1, z)]) == "water"
+    for c in hl.wet:
+        assert _nm(w.get(c, "minecraft:air")) in ("air", "water"), ("decor in the waterfall", c, w.get(c))
+
+
+@pytest.mark.parametrize("n", [4, 47])
+def test_hall_is_lit_and_themed(n):
+    hl = _hall(n)
+    w = _world(hl)
+    EMIT = ("light", "lantern", "ochre_froglight", "pearlescent_froglight", "verdant_froglight", "shroomlight",
+            "sea_lantern", "waxed_copper_bulb", "cave_vines", "sea_pickle")
+    lights = [c for c, s in w.items() if _nm(s) in EMIT]
+    assert len(lights) > 40
+    import bisect
+    lights.sort()
+    floor = [(x, 0, z) for (x, y, z), s in w.items() if y == 0 and s == "minecraft:air" and _solid(w.get((x, -1, z), "minecraft:air"))]
+    for c in floor:   # a light source within 12 (Manhattan): block light >= 3 everywhere, no mob spawns
+        assert any(abs(c[0] - l[0]) + abs(c[1] - l[1]) + abs(c[2] - l[2]) <= 12 for l in lights), c
+    # every bay has its own theme on its floor and walls, a glowing signpost and a gold chandelier
+    for b in hl.lay["bays"]:
+        sx, sz = b["signpost"]
+        assert (sx, 1, sz) in hl.signs
+        col, lines = hl.signs[(sx, 1, sz)]
+        assert col == b["color"] and lines[1] == b["label"]
+    golds = sum(1 for s in w.values() if _nm(s) == "gold_block")
+    assert golds >= 20
+    names = {_nm(s) for s in w.values()}
+    for must in ("moss_block", "amethyst_block", "azalea_leaves", "shroomlight", "mangrove_log", "water", "lily_pad",
+                 "spore_blossom", "cave_vines", "iron_chain", "light", "polished_blackstone_bricks"):
+        assert must in names, must
+
+
 # --------------------------------------------------------------------------- datapack
 MC_ROOTS = {"fill", "setblock", "tellraw", "particle", "summon", "data", "execute", "say", "function",
-            "place", "kill"}
+            "place", "kill", "schedule", "forceload", "tag"}
 
 
 def _scan_balance(line):
@@ -309,6 +506,11 @@ def lint_line(line):
         probs.append("particle coords not relative")
     if root == "place" and not (toks[1] == "template" and _coords_ok(toks[3:6])):
         probs.append("place coords not relative")
+    if root == "forceload" and not (toks[1] in ("add", "remove") and _coords_ok(toks[2:6])):
+        probs.append("forceload coords not relative")
+    if root == "schedule" and not (toks[1] == "function" and re.match(r"^[a-z0-9_]+:[a-z0-9_]+$", toks[2])
+                                   and re.match(r"^\d+t$", toks[3])):
+        probs.append("bad schedule")
     if root == "execute":
         for i, t in enumerate(toks):
             if t == "positioned" and not _coords_ok(toks[i + 1:i + 4]):
@@ -324,6 +526,9 @@ def test_linter_catches_bad_lines():
     assert lint_line("fill 0 0 0 ~1 ~1 ~1 stone") != []
     assert lint_line("gamemode creative") != []
     assert lint_line('summon text_display ~ ~ ~ {text:{"text":"x"}') != []
+    assert lint_line("forceload add 0 0 ~5 ~5") != []
+    assert lint_line("schedule function ns:s_1 2t") == []
+    assert lint_line("schedule function ns:s_1 2") != []
 
 
 @pytest.fixture
@@ -332,12 +537,21 @@ def built(fake_root):
     return data, dp.build_files(data, namespace="hermes_hq", bridge_port=8781)
 
 
+def _build_src(files, ns="hermes_hq"):
+    """All build stage functions in order (b_0, b_1, ...)."""
+    i, out = 0, []
+    while f"data/{ns}/function/b_{i}.mcfunction" in files:
+        out.append(files[f"data/{ns}/function/b_{i}.mcfunction"].decode())
+        i += 1
+    return out
+
+
 def test_pack_meta_and_layout(built):
     _, files = built
     meta = json.loads(files["pack.mcmeta"])
     assert meta["pack"]["pack_format"] == 107
     assert meta["pack"]["min_format"] == 107 and meta["pack"]["max_format"] == 107
-    for f in ("build", "build_at", "preview", "clear", "clear_at", "info"):
+    for f in ("build", "build_at", "b_0", "preview", "clear", "clear_at", "c_0", "info"):
         assert f"data/hermes_hq/function/{f}.mcfunction" in files
     assert not any("/functions/" in k or "/structures/" in k for k in files)
     assert all(k == "pack.mcmeta" or k.startswith("data/hermes_hq/") for k in files)
@@ -369,7 +583,7 @@ def _text_payloads(src):
     """Every text component (JSON) after 'text:' or a tellraw selector, parsed."""
     out = []
     for line in src.split("\n"):
-        for m in re.finditer(r"(?:text:|tellraw @[as] )", line):
+        for m in re.finditer(r"(?:(?<![a-z_])text:|messages:|tellraw @[as](?:\[[^\]]*\])? )", line):
             i = m.end()
             depth, q, esc, j = 0, False, False, i
             for j in range(i, len(line)):
@@ -404,12 +618,24 @@ def test_text_components_escape_user_strings(built):
     assert "\u00a7" not in flat
     assert "x" * 200 not in flat           # clamped
     assert "say pwned" not in [ln.split(" ")[0] for ln in src.split("\n")]
+    chat = {"black", "dark_blue", "dark_green", "dark_aqua", "dark_red", "dark_purple", "gold", "gray", "dark_gray",
+            "blue", "green", "aqua", "red", "light_purple", "yellow", "white"}
+
+    def colors(x):
+        if isinstance(x, list):
+            for y in x:
+                yield from colors(y)
+        elif isinstance(x, dict):
+            if "color" in x:
+                yield x["color"]
+    used = set(colors(payloads))
+    assert used and used <= chat, used - chat          # dye names (cyan, pink) fail to load the whole function
     assert all(ln.isascii() for ln in src.split("\n"))
 
 
 def test_desk_labels_have_line_breaks(built):
     data, files = built
-    src = files["data/hermes_hq/function/build_at.mcfunction"].decode()
+    src = "\n".join(_build_src(files))
     desks = [pl for pl in _text_payloads(src) if isinstance(pl, list) and pl[0]["text"].rstrip("\n") == "default"]
     assert len(desks) == 1
     texts = [c["text"] for c in desks[0]]
@@ -487,13 +713,25 @@ def test_desk_templates_are_presets_only(built):
         assert pre["Tabs"] == [{"Name": "Hermes", "Kind": "hermes"}, {"Name": "Shell", "Kind": "shell"}]
         seen[pre.get("Profile", "default")] = pre["Name"]
         mons = [b for b in s["blocks"] if pal[b["state"]]["Name"] == "omolife:monitor"]
-        assert len(mons) == 6 and {(m["nbt"]["Width"], m["nbt"]["Height"]) for m in mons} == {(3, 2)}
-        assert {(m["nbt"]["XIndex"], m["nbt"]["YIndex"]) for m in mons} == {(i, j) for i in range(3) for j in range(2)}
+        assert len(mons) == 15 and {(m["nbt"]["Width"], m["nbt"]["Height"]) for m in mons} == {(5, 3)}
+        assert {(m["nbt"]["XIndex"], m["nbt"]["YIndex"]) for m in mons} == {(i, j) for i in range(5) for j in range(3)}
         assert not any("OmoUrl" in m["nbt"] for m in mons)
         # the station touches exactly one monitor (bottom middle)
         sp = stations[0]["pos"]
         touching = [m for m in mons if sum(abs(a - b) for a, b in zip(m["pos"], sp)) == 1]
-        assert len(touching) == 1 and touching[0]["nbt"]["XIndex"] == 1 and touching[0]["nbt"]["YIndex"] == 0
+        assert len(touching) == 1 and touching[0]["nbt"]["XIndex"] == 2 and touching[0]["nbt"]["YIndex"] == 0
+        # under the screen in the frame row; the desk cell in front of it is open (air) so it stays clickable
+        assert touching[0]["pos"] == [sp[0], sp[1] + 1, sp[2]]
+        front = [b for b in s["blocks"] if b["pos"] == [sp[0], sp[1], sp[2] + 1]]
+        assert front and pal[front[0]["state"]]["Name"] == "minecraft:air"
+        # a glowing, waxed sign with the profile name on the top beam
+        signs = [b for b in s["blocks"] if pal[b["state"]]["Name"].endswith("_wall_sign")]
+        assert len(signs) == 1
+        sn = signs[0]["nbt"]
+        assert sn["is_waxed"] == 1 and sn["front_text"]["has_glowing_text"] == 1
+        lines = [m["text"] for m in sn["front_text"]["messages"]]
+        assert len(lines) == 4 and all(len(x) <= 15 for x in lines) and lines[0] == dp.clean(pre.get("Profile", "default"), 15)
+        assert all("\n" not in x and "\u00a7" not in x for x in lines)
     assert set(seen) == {"default", "alpha", "beta", "gamma"}
 
 
@@ -519,32 +757,93 @@ def test_board_template_url(built):
     assert len(mons) == w * h and w <= 16 and h <= 12
 
 
-def test_build_warns_then_clears_only_hall(built):
+def test_build_warns_then_runs_in_stages(built):
     data, files = built
-    L = lay.plan_layout(len(data["profiles"]))
+    ns = "hermes_hq"
+    L = lay.plan_layout(len(data["profiles"]), [p["name"] for p in data["profiles"]])
     h = L["hall"]
-    b = files["data/hermes_hq/function/build_go.mcfunction"].decode()
-    cmds = [ln for ln in b.split("\n") if ln and not ln.startswith("#")]
-    assert cmds[0].startswith("tellraw") and "build_at" in cmds[1]
-    at = files["data/hermes_hq/function/build_at.mcfunction"].decode()
-    cmds = [ln for ln in at.split("\n") if ln and not ln.startswith("#")]
-    first_fill = next(i for i, c in enumerate(cmds) if c.startswith("fill"))
-    assert all(not c.startswith(("setblock", "place", "summon")) for c in cmds[:first_fill])
+    fns = {k.split("/")[-1][:-11]: v.decode() for k, v in files.items() if k.endswith(".mcfunction")}
+    go = [ln for ln in fns["build_go"].split("\n") if ln and not ln.startswith("#")]
+    assert go[0].startswith("tellraw") and "build_at" in go[1]
+    at = [ln for ln in fns["build_at"].split("\n") if ln and not ln.startswith("#")]
+    assert at[0].startswith("summon minecraft:marker") and "hermes_hq_building" in at[0]
+    assert at[1].startswith("forceload add") and at[-1] == f"function {ns}:b_0"
+    stages = _build_src(files)
+    assert len(stages) >= 2
+    for i, src in enumerate(stages):
+        cmds = [ln for ln in src.split("\n") if ln and not ln.startswith("#")]
+        assert len(cmds) <= dp.STAGE_MAX_CMDS + 200
+        if i + 1 < len(stages):
+            assert cmds[-1] == f"schedule function {ns}:s_{i + 1} {dp.STAGE_GAP}t"
+            s_ = [ln for ln in fns[f"s_{i + 1}"].split("\n") if ln and not ln.startswith("#")]
+            assert s_ == [f"execute as @e[type=minecraft:marker,tag={ns}_origin,tag={ns}_building,limit=1] at @s "
+                          f"run function {ns}:b_{i + 1}"]
+        else:
+            assert f"tag @s remove {ns}_building" in cmds and any(c.startswith("forceload remove") for c in cmds)
+        for c in cmds:
+            if c.startswith("fill"):
+                t = c.split(" ")
+                x1, y1, z1, x2, y2, z2 = (int(v[1:] or 0) for v in t[1:7])
+                assert h["x0"] <= min(x1, x2) and max(x1, x2) <= h["x1"]
+                assert h["y0"] <= min(y1, y2) and max(y1, y2) <= h["y1"]
+                assert h["z0"] <= min(z1, z2) and max(z1, z2) <= h["z1"]
+                assert (abs(x2 - x1) + 1) * (abs(y2 - y1) + 1) * (abs(z2 - z1) + 1) <= 32768
+    first = [ln for ln in stages[0].split("\n") if ln and not ln.startswith("#")]
+    assert first[0].startswith(("fill", "setblock"))         # the shell first, bottom-up
+    clear = fns["clear_at"] + "".join(v for k, v in fns.items() if re.match(r"c_\d+$", k))
+    assert "fill" in clear and "place template" not in clear and "kill @s" in clear
+    assert "unless entity @s[tag=hermes_hq_clearing]" in fns["clear"]
+
+
+def _simulate(cmds, world=None):
+    """Apply fill/setblock lines (relative to 0 0 0) to a dict; returns (world, touched)."""
+    world = {} if world is None else world
+    touched = set()
     for c in cmds:
-        if c.startswith("fill"):
-            t = c.split(" ")
+        t = c.split(" ")
+        if t[0] == "fill":
             x1, y1, z1, x2, y2, z2 = (int(v[1:] or 0) for v in t[1:7])
-            assert h["x0"] <= min(x1, x2) and max(x1, x2) <= h["x1"]
-            assert h["y0"] <= min(y1, y2) and max(y1, y2) <= h["y1"]
-            assert h["z0"] <= min(z1, z2) and max(z1, z2) <= h["z1"]
-            assert (abs(x2 - x1) + 1) * (abs(y2 - y1) + 1) * (abs(z2 - z1) + 1) <= 32768
-    clear = files["data/hermes_hq/function/clear_at.mcfunction"].decode()
-    assert "fill" in clear and "place" not in clear
+            for x in range(min(x1, x2), max(x1, x2) + 1):
+                for y in range(min(y1, y2), max(y1, y2) + 1):
+                    for z in range(min(z1, z2), max(z1, z2) + 1):
+                        if len(t) > 9 and t[8] == "replace":
+                            if world.get((x, y, z)) is None or world[(x, y, z)].split("[")[0] != t[9]:
+                                continue
+                        world[(x, y, z)] = t[7]
+                        touched.add((x, y, z))
+        elif t[0] == "setblock":
+            x, y, z = (int(v[1:] or 0) for v in t[1:4])
+            world[(x, y, z)] = t[4].split("{")[0]
+            touched.add((x, y, z))
+    return world, touched
+
+
+@pytest.mark.parametrize("n", [4, 47])
+def test_compiled_commands_rebuild_the_model_and_clear_only_it(n):
+    profs = [{"name": nm, "label": "", "model": "m", "skills": 1, "cron_jobs": 0, "plugins": 0, "platforms": []}
+             for nm in REAL_NAMES[:n]]
+    files = dp.build_files({"profiles": profs}, bridge_port=8863)
+    L = lay.plan_layout(n, REAL_NAMES[:n])
+    hl = worldgen.hall.Hall(L, profs, url="http://127.0.0.1:8863/board")
+    cmds = [ln for src in _build_src(files) for ln in src.split("\n")]
+    world, touched = _simulate(cmds)
+    assert world == hl.cells                                  # fills + setblocks == the block model, exactly
+    assert not touched & set(hl.tplbox)                       # templates own their cells
+    places = [ln for ln in cmds if ln.startswith("place template")]
+    assert len(places) == n + 1
+    # clear: air over built cells only (y >= 0), pond water back to stone; never outside what the build set
+    fns = {k.split("/")[-1][:-11]: v.decode() for k, v in files.items() if k.endswith(".mcfunction")}
+    clear = [ln for k, v in sorted(fns.items()) if re.match(r"c_\d+$", k) for ln in v.split("\n")]
+    after, cleared = _simulate(clear, dict(world))
+    built = set(hl.cells) | set(hl.tplbox)
+    assert cleared <= built
+    assert {c for c in built if c[1] >= 0} <= cleared
+    assert not any(s.startswith("minecraft:water") for s in after.values())
 
 
 def test_every_label_is_inside_the_kill_box(built):
     """clear must remove every text_display build summoned (selector dx box: [pos, pos+dx+1))."""
-    _, files = built
+    data, files = built
     at = files["data/hermes_hq/function/build_at.mcfunction"].decode()
     m = re.search(r"execute positioned ~(-?\d*) ~(-?\d*) ~(-?\d*) run kill @e\[type=minecraft:text_display,"
                   r"tag=hermes_hq,dx=(\d+),dy=(\d+),dz=(\d+)\]", at)
@@ -553,12 +852,30 @@ def test_every_label_is_inside_the_kill_box(built):
     clear = files["data/hermes_hq/function/clear_at.mcfunction"].decode()
     assert m.group(0) in clear
     n = 0
-    for line in at.split("\n"):
+    for line in "\n".join(_build_src(files)).split("\n"):
         if line.startswith("summon minecraft:text_display"):
             x, y, z = (float(v[1:] or 0) for v in line.split(" ")[2:5])
             assert bx <= x < bx + dx + 1 and by <= y < by + dy + 1 and bz <= z < bz + dz + 1, line[:80]
             n += 1
-    assert n == 4 + 3
+    L = lay.plan_layout(len(data["profiles"]), [p["name"] for p in data["profiles"]])
+    assert n == len(data["profiles"]) + 2 + len(L["bays"])
+
+
+def test_one_web_wall_and_sane_function_count(fake_root):
+    data = inv.collect(fake_root)
+    files = dp.build_files(data, namespace="hq", bridge_port=8863)
+    webs = 0
+    for k, v in files.items():
+        if k.endswith(".nbt"):
+            s = _nbt_read(v)
+            webs += sum(1 for b in s["blocks"] if b.get("nbt", {}).get("OmoUrl"))
+    assert webs == lay.BOARD_MON_W * lay.BOARD_MON_H          # one 9 x 5 Board, nothing else asks for a page
+    profs = [{"name": f"omo-{i:02d}", "label": "", "model": "m", "skills": 1, "cron_jobs": 0, "plugins": 0,
+              "platforms": []} for i in range(96)]
+    big = dp.build_files({"profiles": profs}, namespace="hq", max_desks=96)
+    fns = [k for k in big if k.endswith(".mcfunction")]
+    assert len(fns) <= 60
+    assert len([k for k in big if "/structure/" in k]) == 97
 
 
 def test_block_ids_exist_in_26_2(built):
@@ -578,6 +895,8 @@ def test_block_ids_exist_in_26_2(built):
                     used.add(t[7].split("[")[0])
                 elif t[0] == "setblock":
                     used.add(t[4].split("[")[0].split("{")[0])
+                if t[0] == "fill" and len(t) > 9 and t[8] == "replace":
+                    used.add(t[9])
         elif k.endswith(".nbt"):
             for e in _nbt_read(v)["palette"]:
                 if e["Name"].startswith("minecraft:"):

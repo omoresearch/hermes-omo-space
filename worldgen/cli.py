@@ -84,7 +84,7 @@ def run(args):
               + (" matching --profiles/--exclude" if args.profiles or args.exclude else ""), file=err)
         return 1
     shown = profiles[:max_desks]
-    layout = lay.plan_layout(len(shown))
+    layout = lay.plan_layout(len(shown), [p["name"] for p in shown])
     url = f"http://127.0.0.1:{port}/board"
     summary = {
         "inventory": dict(data, root=_home_short(root)),
@@ -147,7 +147,8 @@ def _print_human(s, out):
         print(f"  not found: {_show(m)}", file=out)
     if s["not_built"]:
         print(f"  {len(s['not_built'])} profiles over --max-desks are not built", file=out)
-    print(f"Hermes HQ: {L['desk_count']} desks in {L['cols']} columns x {L['rows']} rows, "
+    bays = ", ".join(f"{b['label']} ({len(b['desks'])})" for b in L["bays"])
+    print(f"Hermes HQ: {L['desk_count']} desks in {len(L['bays'])} themed bay{'s' if len(L['bays']) != 1 else ''} round a cavern garden [{bays}], "
           f"hall {w} x {h} x {d} (W x H x D) toward +Z; Board wall -> {s['board_url']}", file=out)
 
 
@@ -161,8 +162,9 @@ Install (Omo Space, Minecraft 26.2):
        cp -r "{path.resolve()}" "<world>/datapacks/"
      (Omo Space worlds: ~/.local/share/omo/runtime/game/saves/<World>/datapacks/)
   2. In game: /reload
-  3. Stand in an open, flat area. The hall is built in front of you toward +Z (south),
-     {s['layout']['size'][0]} x {s['layout']['size'][1]} x {s['layout']['size'][2]} blocks; everything in that box is replaced.
+  3. Stand on flat-ish ground (or underground). The cavern hall is built in front of you toward +Z (south),
+     {s['layout']['size'][0]} x {s['layout']['size'][1]} x {s['layout']['size'][2]} blocks (from 4 below your feet); its own rock
+     shell replaces whatever is in that footprint. It builds in a few steps over about a second.
   4. /function {ns}:preview    (particle outline only, nothing changes)
   5. /function {ns}:build
   Also: /function {ns}:info  (summary in chat), /function {ns}:clear  (remove it again).

@@ -29,6 +29,7 @@ import unicodedata
 import zipfile
 from pathlib import Path
 
+from . import hall as H
 from . import layout as L
 
 PACK_FORMAT = 107
@@ -37,17 +38,13 @@ NAMESPACE_RE = re.compile(r"^[a-z0-9_]{1,48}\Z")
 RESERVED_NAMESPACES = {"minecraft", "omolife", "computercraft", "fabric", "realms"}
 MAX_FILL = 32768
 
-# palette (monochrome + gold)
-FLOOR = "minecraft:white_concrete"
-RUNNER = "minecraft:black_concrete"
-WALL = "minecraft:white_concrete"
-TRIM = "minecraft:black_concrete"
-PILLAR = "minecraft:black_concrete"
-WINDOW = "minecraft:glass"
-CEILING = "minecraft:smooth_quartz"
-LIGHT = "minecraft:sea_lantern"
 ACCENT = "minecraft:gold_block"
-GLOW = "minecraft:glowstone"
+# sign (dye) colour -> chat/text component colour
+CHAT = {"yellow": "yellow", "pink": "light_purple", "orange": "gold", "cyan": "dark_aqua", "red": "red", "lime": "green",
+        "light_blue": "aqua", "magenta": "light_purple"}
+STAGE_BUDGET = 24000      # blocks (fill volume, ~1 per setblock, more per template) per build tick
+STAGE_GAP = 2             # ticks between stages
+STAGE_MAX_CMDS = 3000     # commands per stage (well under maxCommandChainLength 65536)
 
 
 # --------------------------------------------------------------------------- text
@@ -190,31 +187,55 @@ def preset_for(profile):
     return pre
 
 
-def desk_template(profile):
-    """5 x 4 x 2: back panel (z 0) and the screen layer (z 1). The Hermes Computer
-    sits under the middle of its 3x2 terminal wall (touching only that panel), a
-    name plate and a status lamp stand on the desk ends, the cell in front stays open."""
-    t = Template(L.DESK_W, 4, L.DESK_D)
-    t.fill(0, 0, 0, 4, 3, 0, "minecraft:black_concrete")
-    t.put(0, 3, 0, ACCENT)
-    t.put(4, 3, 0, ACCENT)
-    t.wall(1, 1, 1, 3, 2)
-    t.put(2, 0, 1, "omolife:hermes_computer[facing=south]", {"id": "omolife:station", "OmoPreset": preset_for(profile)})
-    for x in (0, 1, 3, 4):
-        t.put(x, 0, 1, "minecraft:smooth_quartz")
-    t.put(0, 1, 1, "omolife:name_plate[face=floor,facing=south]")
-    t.put(4, 1, 1, "omolife:status_lamp")
+def sign_nbt(color, lines, bold_line=1):
+    msgs = []
+    for i, ln in enumerate((list(lines) + ["", "", "", ""])[:4]):
+        m = {"text": clean(ln, 15)}
+        if i == bold_line:
+            m["bold"] = Byte(1)
+        msgs.append(m)
+    side = {"messages": msgs, "color": color, "has_glowing_text": Byte(1)}
+    return {"id": "minecraft:sign", "is_waxed": Byte(1), "front_text": side, "back_text": dict(side)}
+
+
+def desk_sign_lines(p):
+    model = p.get("model") or "default model"
+    return [p["name"], p.get("label") or "Hermes agent", model,
+            f"{p.get('skills', 0)} sk \u00b7 {p.get('cron_jobs', 0)} cron"]
+
+
+def template_from(size, kcells):
+    """A Template from hall.kit_cells / hall.board_cells (abstract nbt -> block entities)."""
+    t = Template(*size)
+    for (x, y, z), (spec, meta) in kcells.items():
+        if spec == "omolife:monitor":
+            i, j, w, h = meta["wall"]
+            edges = "".join(c for c, on in (("l", i > 0), ("r", i < w - 1), ("u", j < h - 1), ("d", j > 0)) if on) or "none"
+            nbt = {"id": "omolife:monitor", "XIndex": i, "YIndex": j, "Width": w, "Height": h}
+            if meta.get("url"):
+                nbt.update({"OmoSource": "web", "OmoUrl": meta["url"], "OmoZoom": 100})
+            t.put(x, y, z, f"omolife:monitor[facing=south,orientation=north,state={edges}]", nbt)
+        elif meta and "station" in meta:
+            t.put(x, y, z, spec, {"id": "omolife:station", "OmoPreset": meta["station"]})
+        elif meta and "sign" in meta:
+            color, lines = meta["sign"]
+            t.put(x, y, z, H.mc(spec), sign_nbt(color, lines, bold_line=0))
+        else:
+            t.put(x, y, z, H.mc(spec))
     return t
+
+
+def desk_template(profile, theme=4):
+    """7 x 5 x 2 desk kit (hall.kit_cells): themed frame with gold caps, a joined 5x3 terminal wall, the
+    Hermes Computer UNDER the screen in the frame row (touching only the bottom-middle panel), name plate and
+    status lamp on the desk either side of the open cell in front of the computer, glowing sign on top."""
+    color = L.THEMES[theme][1]
+    kc = H.kit_cells(theme, sign=(color, desk_sign_lines(profile)), preset=preset_for(profile))
+    return template_from((L.KIT_W, L.KIT_H, L.KIT_D), kc)
 
 
 def board_template(url):
-    t = Template(L.BOARD_W, L.BOARD_H, 2)
-    t.fill(0, 0, 0, L.BOARD_W - 1, L.BOARD_H - 1, 0, "minecraft:black_concrete")
-    for x, y in ((0, 0), (L.BOARD_W - 1, 0), (0, L.BOARD_H - 1), (L.BOARD_W - 1, L.BOARD_H - 1)):
-        t.put(x, y, 0, ACCENT)
-    t.fill(1, 0, 1, L.BOARD_W - 2, 0, 1, "minecraft:smooth_quartz")
-    t.wall(1, 1, 1, L.BOARD_MON_W, L.BOARD_MON_H, url)
-    return t
+    return template_from((L.BOARD_W, L.BOARD_H, 1), H.board_cells(url))
 
 
 # --------------------------------------------------------------------------- commands
@@ -276,6 +297,126 @@ def _profile_line(p):
     return clean(" \u00b7 ".join(str(b) for b in bits), 120)
 
 
+def _rects(layer):
+    """Greedy rectangles of equal state in one layer: {(x, z): s} -> [(x0, x1, z0, z1, s)]."""
+    out, done = [], set()
+    for (x, z) in sorted(layer, key=lambda c: (c[1], c[0])):
+        if (x, z) in done:
+            continue
+        s = layer[(x, z)]
+        x1 = x
+        while (x1 + 1, z) in layer and (x1 + 1, z) not in done and layer[(x1 + 1, z)] == s:
+            x1 += 1
+        z1 = z
+        while all((xx, z1 + 1) in layer and (xx, z1 + 1) not in done and layer[(xx, z1 + 1)] == s
+                  for xx in range(x, x1 + 1)):
+            z1 += 1
+        for xx in range(x, x1 + 1):
+            for zz in range(z, z1 + 1):
+                done.add((xx, zz))
+        out.append((x, x1, z, z1, s))
+    return out
+
+
+def boxes(cells):
+    """{(x, y, z): state} -> [(x0, y0, z0, x1, y1, z1, state)], bottom-up, each <= MAX_FILL blocks."""
+    by_y = {}
+    for (x, y, z), s in cells.items():
+        by_y.setdefault(y, {})[(x, z)] = s
+    out, active, prev = [], {}, None
+    for y in sorted(by_y):
+        cur = set(_rects(by_y[y]))
+        for key in list(active):
+            y0 = active[key]
+            area = (key[1] - key[0] + 1) * (key[3] - key[2] + 1)
+            if key not in cur or (y - y0 + 1) * area > MAX_FILL or y != prev + 1:
+                out.append((key[0], y0, key[2], key[1], prev, key[3], key[4]))
+                del active[key]
+        for key in cur:
+            if key not in active:
+                active[key] = y
+        prev = y
+    last = max(by_y) if by_y else 0
+    for key, y0 in active.items():
+        out.append((key[0], y0, key[2], key[1], last, key[3], key[4]))
+    out.sort(key=lambda b: (b[1], b[2], b[0]))
+    return out
+
+
+def _box_cmd(b, mode=""):
+    x0, y0, z0, x1, y1, z1, s = b
+    if (x0, y0, z0) == (x1, y1, z1) and not mode:
+        return f"setblock {_c(x0)} {_c(y0)} {_c(z0)} {s}"
+    return " ".join(filter(None, ["fill", _c(x0), _c(y0), _c(z0), _c(x1), _c(y1), _c(z1), s, mode]))
+
+
+def _cost(cmd):
+    t = cmd.split(" ")
+    if t[0] == "fill":
+        a = [int(v[1:] or 0) for v in t[1:7]]
+        return (abs(a[3] - a[0]) + 1) * (abs(a[4] - a[1]) + 1) * (abs(a[5] - a[2]) + 1) + 4
+    if t[0] == "place":
+        return 300
+    if t[0] == "summon":
+        return 40
+    return 3
+
+
+def stages(cmds, budget=None):
+    budget = budget or STAGE_BUDGET
+    out, cur, used = [], [], 0
+    for c in cmds:
+        k = _cost(c)
+        if cur and (used + k > budget or len(cur) >= STAGE_MAX_CMDS):
+            out.append(cur)
+            cur, used = [], 0
+        cur.append(c)
+        used += k
+    if cur:
+        out.append(cur)
+    return out
+
+
+def sign_cmd(pos, block, color, lines):
+    msgs = [{"text": clean(ln, 15)} for ln in (list(lines) + ["", "", "", ""])[:4]]
+    msgs[1]["bold"] = True
+    side = f"{{messages:{jtext(msgs)},color:{json.dumps(color)},has_glowing_text:1b}}"
+    return f"setblock {_c(pos[0])} {_c(pos[1])} {_c(pos[2])} {block}{{front_text:{side},back_text:{side},is_waxed:1b}}"
+
+
+def build_commands(hall, ns, tag):
+    """Ordered build commands (no staging): shell bottom-up, templates, decor, water, signs."""
+    ph = hall.phase
+    solid = {c: s for c, s in hall.cells.items() if ph[c] == "solid"}
+    cmds = [_box_cmd(b) for b in boxes(solid)]
+    for key, (X, Y, Z), rot, _ in hall.templates:
+        cmds.append(f"place template {ns}:{key} {_c(X)} {_c(Y)} {_c(Z)} {rot}")
+    for phase, rev in (("attach", False), ("hang", True), ("water", False), ("aqua", False)):
+        cs = sorted((c for c in hall.cells if ph[c] == phase), key=lambda c: (c[1], c[2], c[0]), reverse=rev)
+        cmds += [f"setblock {_c(c[0])} {_c(c[1])} {_c(c[2])} {hall.cells[c]}" for c in cs]
+    for c in sorted(hall.signs):
+        color, lines = hall.signs[c]
+        cmds.append(sign_cmd(c, hall.cells[c], color, lines))
+    return cmds
+
+
+def clear_commands(hall):
+    """Air over exactly the built columns (y 0 .. shell top), pond water back to stone. The floor stays."""
+    top = {c: t for c, t in hall.mt.items() if t >= 0}
+    cmds = []
+    if hall.water:
+        xs = [c[0] for c in hall.water]
+        zs = [c[1] for c in hall.water]
+        cmds += fill_cmds(min(xs) - 1, -4, min(zs) - 1, max(xs) + 1, -1, max(zs) + 1, "minecraft:stone",
+                          "replace minecraft:water")
+    for (x0, x1, z0, z1, t) in _rects(top):
+        cmds += fill_cmds(x0, 0, z0, x1, t, z1, "minecraft:air")
+    for c in sorted(hall.cells):
+        if c[1] > hall.mt.get((c[0], c[2]), 999):      # plants on top of the mound
+            cmds.append(f"setblock {_c(c[0])} {_c(c[1])} {_c(c[2])} minecraft:air")
+    return cmds
+
+
 def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48):
     """{relative path: bytes} for the whole datapack."""
     if not NAMESPACE_RE.match(namespace or "") or namespace in RESERVED_NAMESPACES:
@@ -288,12 +429,13 @@ def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48):
     if not profiles:
         raise ValueError("no Hermes profiles to build")
     shown, hidden = profiles[:max_desks], profiles[max_desks:]
-    lay = L.plan_layout(len(shown))
+    lay = L.plan_layout(len(shown), [p["name"] for p in shown])
     ns = namespace
-    tag, origin = ns, ns + "_origin"
+    tag, origin, building, clearing = ns, ns + "_origin", ns + "_building", ns + "_clearing"
     url = f"http://127.0.0.1:{port}/board"
+    hall = H.Hall(lay, shown, url=url)
     h = lay["hall"]
-    W, H, D = lay["size"]
+    W, Hh, D = lay["size"]
     files = {}
 
     def fn(name, lines):
@@ -302,127 +444,143 @@ def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48):
     def say(color, text, sel="@s"):
         return f"tellraw {sel} {jtext({'text': clean(text, 240), 'color': color})}"
 
+    near = "@a[distance=..160]"
+
     # ---- templates
-    for i, p in enumerate(shown):
-        files[f"data/{ns}/structure/desk_{i}.nbt"] = desk_template(p).to_bytes()
+    for d, p in zip(lay["desks"], shown):
+        files[f"data/{ns}/structure/desk_{d['index']}.nbt"] = desk_template(p, d["theme"]).to_bytes()
     files[f"data/{ns}/structure/board.nbt"] = board_template(url).to_bytes()
 
-    # labels sit inside the hall plus the title just outside the door (z 0.3): kill box z0-1 .. z1
+    # every label sits inside the hall box or just outside the facade (z 0.3): kill box z0-1 .. z1
     kill_box = (f"execute positioned {_c(h['x0'])} {_c(h['y0'])} {_c(h['z0'] - 1)} run kill "
-                f"@e[type=minecraft:text_display,tag={tag},dx={W - 1},dy={H + 2},dz={D}]")
+                f"@e[type=minecraft:text_display,tag={tag},dx={W - 1},dy={Hh + 2},dz={D}]")
+    kill_items = (f"execute positioned {_c(h['x0'])} {_c(h['y0'])} {_c(h['z0'])} run kill "
+                  f"@e[type=minecraft:item,dx={W - 1},dy={Hh + 2},dz={D - 1}]")
+    load = f"forceload add {_c(h['x0'])} {_c(h['z0'])} {_c(h['x1'])} {_c(h['z1'])}"
+    unload = f"forceload remove {_c(h['x0'])} {_c(h['z0'])} {_c(h['x1'])} {_c(h['z1'])}"
     exists = f"@e[type=minecraft:marker,tag={origin}]"
 
-    # ---- build
+    # ---- labels (last stage)
+    labels = []
+    for d, p in zip(lay["desks"], shown):
+        labels.append(text_display(d["text_pos"], desk_lines(p), tag, scale=0.4, line_width=170))
+    bd = lay["board"]
+    labels.append(text_display([0.5, L.BOARD_H + 0.25, bd["monitor_z"] - 0.4],
+                               [comp("HERMES BOARD", "gold", 20, bold=True), comp(url, "gray", 60, pre="\n")],
+                               tag, scale=0.6))
+    title = [comp("HERMES HQ", "gold", 20, bold=True),
+             comp(f"{len(shown)} agents \u00b7 one desk per Hermes profile", "white", 60, pre="\n")]
+    labels.append(text_display([0.5, 5.2, 0.3], title, tag, scale=0.7, line_width=260))
+    for b in lay["bays"]:
+        sx, sz = b["signpost"]
+        labels.append(text_display([sx + 0.5, 2.6, sz + 0.5], [comp(b["label"], CHAT[b["color"]], 40, bold=True)], tag, scale=0.8))
+
+    # ---- build: stage 0 runs at once, the rest via schedule from the origin marker (no lag spike)
+    body = build_commands(hall, ns, tag)
+    st = stages(body)
+    nst = len(st)
     fn("build", [
-        f"# Hermes HQ ({ns}): {len(shown)} desks. Builds a {W}x{H}x{D} hall from your position toward +Z (south).",
-        f"execute if entity {exists} run " + say("red", f"A Hermes HQ from this pack is already built nearby. "
-                                                       f"Stand near it and run /function {ns}:clear first."),
+        f"# Hermes HQ v2 ({ns}): {len(shown)} desks. Builds a {W}x{Hh}x{D} cavern hall from your position toward +Z.",
+        f"execute if entity {exists} run " + say("red", f"A Hermes HQ from this pack is already built (or being built) "
+                                                       f"nearby. Stand near it and run /function {ns}:clear first."),
         f"execute unless entity {exists} run function {ns}:build_go",
     ])
     fn("build_go", [
         "# warn, then build at the block you stand in",
-        say("yellow", f"Hermes HQ: replacing EVERYTHING in a {W} x {H} x {D} box in front of you (toward +Z / south, "
-                      f"x {h['x0']}..{h['x1']} relative) with the hall. Nothing outside that box is touched."),
+        say("yellow", f"Hermes HQ: replacing everything in the hall's footprint, a {W} x {Hh} x {D} box in front of "
+                      f"you (toward +Z / south, x {h['x0']}..{h['x1']} relative, from 4 below your feet), with the "
+                      f"cavern hall. Nothing outside that box is touched."),
         f"execute align xyz run function {ns}:build_at",
-        say("green", f"Hermes HQ built: {len(shown)} desks. Walk south through the door. Open a desk once to "
-                     f"make its workspace. Remove it with /function {ns}:clear."),
+        say("aqua", f"Building in {nst} steps over {max(1, (nst - 1) * STAGE_GAP)} ticks..."),
     ])
-    b = ["# clear the hall volume (and old labels) first, then build"]
-    b.append(kill_box)
-    b += fill_cmds(h["x0"], 0, h["z0"], h["x1"], h["y1"], h["z1"], "minecraft:air")
-    xi0, xi1, zi0, zi1 = h["x0"] + 1, h["x1"] - 1, h["z0"] + 1, h["z1"] - 1
-    # floor
-    b += fill_cmds(h["x0"], -1, h["z0"], h["x1"], -1, h["z1"], FLOOR)
-    b += fill_cmds(-1, -1, zi0, 1, -1, zi1, RUNNER)
-    for z in range(zi0, zi1 + 1, 6):
-        b.append(f"setblock ~ ~-1 {_c(z)} {ACCENT}")
-    # walls: black base + top band, white between, glass windows on the sides
-    for (xa, za, xb, zb) in ((h["x0"], h["z0"], h["x0"], h["z1"]), (h["x1"], h["z0"], h["x1"], h["z1"]),
-                             (h["x0"], h["z0"], h["x1"], h["z0"]), (h["x0"], h["z1"], h["x1"], h["z1"])):
-        b += fill_cmds(xa, 0, za, xb, 0, zb, TRIM)
-        b += fill_cmds(xa, 1, za, xb, L.INNER_H - 2, zb, WALL)
-        b += fill_cmds(xa, L.INNER_H - 1, za, xb, L.INNER_H - 1, zb, TRIM)
-    for x in (h["x0"], h["x1"]):
-        b += fill_cmds(x, 2, zi0 + 1, x, 3, zi1 - 1, WINDOW)
-        for z in range(zi0, zi1 + 1, 6):
-            b += fill_cmds(x, 1, z, x, L.INNER_H - 2, z, PILLAR)
-            b.append(f"setblock {_c(x)} ~{L.INNER_H - 2} {_c(z)} {ACCENT}")
-    # ceiling with a light grid
-    b += fill_cmds(h["x0"], L.INNER_H, h["z0"], h["x1"], L.INNER_H, h["z1"], CEILING)
-    for x in range(0, xi1 + 1, 4):
-        for z in range(zi0 + 1, zi1 + 1, 3):
-            for xx in sorted({x, -x}):
-                if xi0 <= xx <= xi1:
-                    b.append(f"setblock {_c(xx)} ~{L.INNER_H} {_c(z)} {LIGHT}")
-    # door with a gold frame
-    d = lay["door"]
-    b += fill_cmds(d["x0"] - 1, 0, d["z"], d["x1"] + 1, d["y1"] + 1, d["z"], ACCENT)
-    b += fill_cmds(d["x0"], d["y0"], d["z"], d["x1"], d["y1"], d["z"], "minecraft:air")
-    b.append(f"setblock ~ ~4 {_c(d['z'])} {GLOW}")
-    # desks + board (templates: joined monitor walls, preset-only stations)
-    for i, desk in enumerate(lay["desks"]):
-        X, Y, Z = desk["template_pos"]
-        b.append(f"place template {ns}:desk_{i} {_c(X)} {_c(Y)} {_c(Z)} 180")
-    X, Y, Z = lay["board"]["template_pos"]
-    b.append(f"place template {ns}:board {_c(X)} {_c(Y)} {_c(Z)} 180")
-    # labels
-    for desk, p in zip(lay["desks"], shown):
-        b.append(text_display(desk["text_pos"], desk_lines(p), tag, scale=0.42, line_width=170))
-    bz = lay["board"]["monitor_z"]
-    b.append(text_display([0.5, L.BOARD_H - 0.45, bz + 0.45],
-                          [comp("HERMES BOARD", "gold", 20, bold=True), comp(url, "gray", 60, pre="\n")],
-                          tag, scale=0.5))
-    title = [comp("HERMES HQ", "gold", 20, bold=True),
-             comp(f"{len(shown)} agents \u00b7 one desk per Hermes profile", "white", 60, pre="\n")]
-    b.append(text_display([0.5, 3.6, 0.3], title, tag, scale=1.0, line_width=260))
-    b.append(text_display([0.5, 3.4, 4.5], title, tag, scale=0.7, line_width=260))
-    b.append(f"summon minecraft:marker ~ ~ ~ {{Tags:[{json.dumps(tag)},{json.dumps(origin)}]}}")
-    fn("build_at", b)
+    fn("build_at", [
+        "# remember the origin, keep the area loaded, clear old labels, then stage 0",
+        f"summon minecraft:marker ~ ~ ~ {{Tags:[{json.dumps(tag)},{json.dumps(origin)},{json.dumps(building)}]}}",
+        load,
+        kill_box,
+        f"function {ns}:b_0",
+    ])
+    for i, part in enumerate(st):
+        lines = [f"# build stage {i + 1}/{nst} (runs as the origin marker)"] + part
+        if i + 1 < nst:
+            lines.append(f"schedule function {ns}:s_{i + 1} {STAGE_GAP}t")
+        else:
+            lines += labels
+            lines += [kill_items, f"tag @s remove {building}", unload,
+                      say("green", f"Hermes HQ built: {len(shown)} desks. Walk south through the arch. Open a desk "
+                                   f"once to make its workspace. Remove it with /function {ns}:clear.", near)]
+        fn(f"b_{i}", lines)
+        if i:
+            fn(f"s_{i}", [f"# scheduled stage {i + 1}: only while this pack's origin marker is still building",
+                          f"execute as @e[type=minecraft:marker,tag={origin},tag={building},limit=1] at @s "
+                          f"run function {ns}:b_{i}"])
 
     # ---- preview: particle outline only, no blocks
     pv = ["# outline the footprint with particles; nothing is changed"]
     x0, x1, z0, z1 = h["x0"], h["x1"], h["z0"], h["z1"]
     pts = set()
-    for x in range(x0, x1 + 1):
+    for x in range(x0, x1 + 1, 2):
         pts |= {(x, z0), (x, z1)}
-    for z in range(z0, z1 + 1):
+    for z in range(z0, z1 + 1, 2):
         pts |= {(x0, z), (x1, z)}
     for x, z in sorted(pts):
         pv.append(f"particle minecraft:end_rod {_c(x + 0.5)} ~0.2 {_c(z + 0.5)} 0 0 0 0 1 force")
     for x, z in ((x0, z0), (x0, z1), (x1, z0), (x1, z1)):
-        for y in range(1, H):
+        for y in range(1, Hh - 4, 2):
             pv.append(f"particle minecraft:end_rod {_c(x + 0.5)} {_c(y + 0.2)} {_c(z + 0.5)} 0 0 0 0 1 force")
+    d = lay["door"]
     for x in range(d["x0"], d["x1"] + 1):
         pv.append(f"particle minecraft:happy_villager {_c(x + 0.5)} ~0.5 {_c(d['z'] + 0.5)} 0.2 0.3 0.2 0 4 force")
     fn("preview_at", pv)
     fn("preview", [
         f"# Hermes HQ ({ns}) preview",
-        say("aqua", f"Hermes HQ preview: {len(shown)} desks, a {W} x {H} x {D} hall (x {h['x0']}..{h['x1']}, "
-                    f"floor 1 below your feet, {H - 1} high) from here toward +Z / south. The green sparks are the "
-                    f"door. Run again to show it again; /function {ns}:build to build."),
+        say("aqua", f"Hermes HQ preview: {len(shown)} desks in {len(lay['bays'])} bays, a {W} x {Hh} x {D} cavern hall "
+                    f"(x {h['x0']}..{h['x1']}, floor 1 below your feet) from here toward +Z / south. The green sparks "
+                    f"are the arch. Run again to show it again; /function {ns}:build to build."),
         f"execute if entity {exists} run " + say("red", "Note: a Hermes HQ from this pack is already built nearby."),
         f"execute align xyz run function {ns}:preview_at",
     ])
 
-    # ---- clear: only where this pack built (its marker), only the hall volume
-    c = ["# remove the hall (above the floor), its labels and the origin marker"]
-    c.append(kill_box)
-    c += fill_cmds(h["x0"], 0, h["z0"], h["x1"], h["y1"], h["z1"], "minecraft:air")
-    c.append("kill @s")
-    fn("clear_at", c)
+    # ---- clear: only where this pack built (its marker), only the built columns
+    cst = stages(clear_commands(hall))
+    fn("clear_at", [
+        "# stop a running build, keep the area loaded, remove labels, then clear in stages",
+        f"tag @s remove {building}",
+        f"tag @s add {clearing}",
+        load,
+        kill_box,
+        f"function {ns}:c_0",
+    ])
+    for i, part in enumerate(cst):
+        lines = [f"# clear stage {i + 1}/{len(cst)} (runs as the origin marker)"] + part
+        if i + 1 < len(cst):
+            lines.append(f"schedule function {ns}:cs_{i + 1} {STAGE_GAP}t")
+        else:
+            lines += [kill_items, unload,
+                      say("green", "Hermes HQ removed (the floor stays; mine or /fill it yourself).", near),
+                      "kill @s"]
+        fn(f"c_{i}", lines)
+        if i:
+            fn(f"cs_{i}", [f"# scheduled clear stage {i + 1}",
+                           f"execute as @e[type=minecraft:marker,tag={origin},tag={clearing},limit=1] at @s "
+                           f"run function {ns}:c_{i}"])
     fn("clear", [
         f"# Hermes HQ ({ns}) clear",
         f"execute unless entity {exists} run " + say("red", "No Hermes HQ from this pack found nearby "
                                                              "(stand inside or next to it)."),
-        f"execute if entity {exists} run " + say("yellow", "Removing Hermes HQ (the white floor stays; mine or "
-                                                            "/fill it yourself)."),
-        f"execute as @e[type=minecraft:marker,tag={origin},limit=1,sort=nearest] at @s run function {ns}:clear_at",
+        f"execute if entity {exists} run " + say("yellow", "Removing Hermes HQ..."),
+        f"execute as @e[type=minecraft:marker,tag={origin},limit=1,sort=nearest] unless entity @s[tag={clearing}] "
+        f"at @s run function {ns}:clear_at",
     ])
 
     # ---- info
     info = [f"# Hermes HQ ({ns}) summary",
             "tellraw @s " + jtext([comp("Hermes HQ ", "gold", 20, bold=True),
-                                   comp(f"{len(shown)} desks \u00b7 board {url}", "white", 120)])]
+                                   comp(f"{len(shown)} desks in {len(lay['bays'])} bays \u00b7 board {url}", "white", 120)])]
+    for b in lay["bays"]:
+        info.append("tellraw @s " + jtext([comp(f"{b['label']} ", CHAT[b["color"]], 40, bold=True),
+                                           comp(f"{b['theme_name']} bay, {b['side']}: "
+                                                + ", ".join(shown[i]["name"] for i in b["desks"]), "gray", 200)]))
     for p in shown:
         info.append("tellraw @s " + jtext([comp(p["name"], "white", 41, bold=True),
                                            comp(" " + _profile_line(p), "gray", 121)]))
@@ -433,7 +591,7 @@ def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48):
 
     files["pack.mcmeta"] = (json.dumps({"pack": {
         "pack_format": PACK_FORMAT, "min_format": PACK_FORMAT, "max_format": PACK_FORMAT,
-        "description": clean(f"Hermes HQ: {len(shown)} Hermes desks + Hermes Board ({ns})", 120)}},
+        "description": clean(f"Hermes HQ v2: {len(shown)} Hermes desks + Hermes Board ({ns})", 120)}},
         indent=1, ensure_ascii=True) + "\n").encode("ascii")
     return dict(sorted(files.items()))
 

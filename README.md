@@ -1,7 +1,8 @@
 # Omo Space for Hermes (`omo-space`)
 
 **Your whole Hermes system, as a building in Minecraft.** Every Hermes profile gets a desk in a
-generated *Hermes HQ* hall inside [Omo Space](https://github.com/omoresearch/omo-space) (the Omo
+generated *Hermes HQ*, a glowing cavern hall (pond, waterfalls, glow tree, a big HERMES sign over the arch)
+whose themed bays group profiles that share a prefix (`omo-*`, `yt-*` ...) into neighbourhoods, inside [Omo Space](https://github.com/omoresearch/omo-space) (the Omo
 Research Minecraft world with Hermes Computers, terminals and web walls). Desk lamps light up while an
 agent thinks or runs a tool, and the in-game **Hermes Board** shows what every session is doing:
 CLI, TUI, Telegram and other gateway chats, cron jobs, subagents and kanban workers.
@@ -82,6 +83,8 @@ The plugin adds:
    - `hermes omo feed [-n N] [--json] [--follow]`: print or follow this profile's feed.
    - `hermes omo world [--install [WORLD] | --out DIR | --zip] [--list-worlds] [--dry-run] ...`:
      generate the *Hermes HQ* datapack (one Hermes Computer desk per profile plus a Hermes Board wall).
+     `--dry-run --json` prints the layout as data (bays, desks, stations, Board, regions); `worldgen.hall.Hall`
+     gives the full block model for previews. In game the hall builds in a few staged ticks.
 
 ## Privacy and disclosure (what it does and does not do)
 
