@@ -56,5 +56,5 @@ config_schema:
   notify_on_finish:
     type: bool
     default: false
-    label: Toast when a long turn finishes
-    description: Queue an in-game toast when a turn that took more than 60 seconds ends.
+    label: Notice when a long turn finishes
+    description: Queue an in-game notice when a turn that took more than 60 seconds ends.

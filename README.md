@@ -2,10 +2,16 @@
 
 **Your whole Hermes system, as a building in Minecraft.** Every Hermes profile gets a desk in a
 generated *Hermes HQ*, a glowing cavern hall (pond, waterfalls, glow tree, a big HERMES sign over the arch)
-whose themed bays group profiles that share a prefix (`omo-*`, `yt-*` ...) into neighbourhoods, inside [Omo Space](https://github.com/omoresearch/omo-space) (the Omo
-Research Minecraft world with Hermes Computers, terminals and web walls). Desk lamps light up while an
-agent thinks or runs a tool, and the in-game **Hermes Board** shows what every session is doing:
-CLI, TUI, Telegram and other gateway chats, cron jobs, subagents and kanban workers.
+whose themed bays group profiles that share a prefix (`omo-*`, `yt-*` ...) into neighbourhoods, inside
+[Omo Space](https://github.com/omoresearch/omo-space) (the Omo Research Minecraft world with Omo Computers,
+terminals and web walls). Each desk is an **Omo Computer** set to that profile, and the **Hermes Board** on the
+wall shows what every session is doing: CLI, TUI, Telegram and other gateway chats, cron jobs, subagents and
+kanban workers.
+
+> **Status.** Desks, status lamps and the Board wall work with Omo Space v1.3 today. Hermes activity on the
+> Board, the *Elsewhere* list and HUD notices need the feed-aware bridge from
+> [omoresearch/omo-space PR #40](https://github.com/omoresearch/omo-space/pull/40), **coming in the next Omo
+> Space release**. The plugin already writes the feed that bridge reads.
 
 <!-- Screenshots: real in-game shots are being captured to /data/yifan/hermes-omo-plugin/e2e/shots/;
      copy the chosen ones to docs/ in this repo and pin them in the catalog entry. -->
@@ -22,9 +28,23 @@ CLI, TUI, Telegram and other gateway chats, cron jobs, subagents and kanban work
 - Agent tools `omo_status` / `omo_notify`, the `/omo` slash command ("where does this chat live in
   the world?") and `hermes omo status` (a doctor with one next step).
 
-## Quickstart (you already run Hermes)
+## Install Omo Space (v1.3)
 
-Prerequisite: Omo Space is installed and you have opened a world once (so its bridge is running).
+Two ways in (full steps in Omo Space's [README](https://github.com/omoresearch/omo-space#install)):
+
+- **The Omo Space app** sets up its own Minecraft, Fabric, the mods, the bridge and its services.
+- **CurseForge, the Modrinth App or Prism:** add *Omo Space*, *CC: Tweaked* and (for web walls) *MCEF
+  Modern* to an instance, then install only the bridge (Linux and macOS):
+
+  ```bash
+  bash install.sh --bridge-only omo-space-1.3.0-linux-x64.tar.gz   # bridge + session server, links your instances
+  omo-space-link --game-dir "<instance folder>"                    # an instance added later
+  ```
+
+Open a world once so the bridge is running. In the creative menu the desk block is the **Omo Computer**
+(same id as the old Hermes Computer, `omolife:hermes_computer`), next to the **Omo Monitor**.
+
+## Quickstart (you already run Hermes)
 
 ```bash
 hermes plugins install https://github.com/omoresearch/hermes-omo-space --enable   # placeholder URL until published
@@ -40,6 +60,8 @@ hermes omo setup
    lists `hermes -p <profile> plugins enable omo-space` for each one and runs them after one y/N prompt.
 3. World: offers to generate Hermes HQ and copy it into `<world>/datapacks/hermes_hq/`. Then in game:
    `/reload`, stand in an open flat area, `/function hermes_hq:preview`, `/function hermes_hq:build`.
+   Right-click each desk's Omo Computer once: since Omo Space v1.3 a station only opens its workspace
+   after its owner uses it.
 
 Without a terminal (cron, gateway, CI) `hermes omo setup` just prints the checklist and exits 0.
 The same steps by hand:
@@ -48,17 +70,39 @@ The same steps by hand:
 hermes omo status                                  # doctor: bridge, feed, next step
 hermes omo world --list-worlds
 hermes omo world --install "Omo World"             # --force replaces an earlier Hermes HQ, nothing else
+hermes omo world --install "My World" --saves-dir "<instance folder>/saves"   # store (CurseForge/Modrinth/Prism) worlds
 hermes omo world --out ./hermes-hq-datapack        # or just write the datapack somewhere
 ```
 
-Then chat with Hermes anywhere. Desks light up and the Board fills in.
+Then chat with Hermes anywhere.
+
+## What you see
+
+- **Omo Computer desks**, one per profile, the profile name on a plate. Opening one starts a Hermes tab in
+  that profile (`hermes -p <profile> chat --tui`), kept by Omo Space's tmux server when you walk away.
+- **Status lamps**: each desk's lamp glows gold while its agent or a command works, green when idle. Omo
+  Space drives these itself.
+- **The Hermes Board** (`/board`, on the wall in the hall): every tab with what its agent is doing,
+  `thinking`, `running terminal 12s`, `idle · 3 turns`, compact cards past 24 live workspaces. *(PR #40)*
+- **Elsewhere**: sessions with no desk (a Telegram chat on the gateway, a cron job, a plain terminal, a
+  subagent) listed with their platform. *(PR #40)*
+- **HUD notices**: an agent's `omo_notify` shows as a card top-left for about 5 s, up to three, only while no
+  screen is open; an open station panel gets a toast. `/omonotices on|off|test` in game, or
+  `hermesNotices=false` in `config/omolife-client.properties`. *(PR #40)*
+- **The station splash**: before a desk connects it shows the Omo Space title card with the omo.sh mark.
+  *(omo-space PR #41, next release)*
+
+*(PR #40)* = needs the bridge from omoresearch/omo-space PR #40, coming in the next Omo Space release.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
 | `hermes omo status` says the bridge is **not yours** | On a shared machine port 8780 can be another user's Omo bridge; the plugin never queries it. Point this profile at yours: `hermes omo setup` finds it, or `hermes config set plugins.entries.omo-space.settings.bridge_url http://127.0.0.1:<port>`. |
-| Board shows nothing, but `hermes omo feed` has events | Your Omo bridge predates Hermes feed support (`hermes omo status` says so). Update Omo Space with its launcher. |
+| Board shows no Hermes activity, but `hermes omo feed` has events | Your Omo bridge predates Hermes feed support (`hermes omo status` says so). That support is in omoresearch/omo-space PR #40, coming in the next Omo Space release. |
+| A desk says "Waiting for the world owner" | Omo Space v1.3: right-click the desk's Omo Computer (or its wall) once. |
+| No notices in game | `/omonotices on`, then `/omonotices test`. They draw only while no screen is open, and need the PR #40 bridge. |
+| Board shows activity but no messages | By design: `omo_notify` text stays off the wall Board unless the bridge service runs with `OMO_BOARD_MESSAGES=1`. |
 | Board shows nothing and the feed is empty | The plugin is not enabled in that profile (`hermes omo setup` lists them), or `feed` is set to `false`. |
 | Changes do not show up after updating the plugin | A running gateway keeps the plugin module it loaded. Run `hermes plugins disable omo-space` then `hermes plugins enable omo-space` (per profile) so it reloads. |
 | `world --install` says the datapack already exists | Add `--force`; only `<world>/datapacks/hermes_hq/` is replaced. Run `/reload` in game afterwards. |
@@ -69,12 +113,13 @@ Then chat with Hermes anywhere. Desks light up and the Board fills in.
 The plugin adds:
 
 1. **A live activity feed.** Hooks write a small, metadata-only feed into this plugin's own data dir
-   in the active profile. The Omo bridge reads it to light the desk lamps, show what every agent is
-   doing on the Hermes Board, and list sessions that live outside the world (Telegram, cron, plain
-   terminals, subagents) under *Elsewhere*.
+   in the active profile. The feed-aware Omo bridge (omo-space PR #40) reads it to show what every
+   agent is doing on the Hermes Board, list sessions that live outside the world (Telegram, cron, plain
+   terminals, subagents) under *Elsewhere*, and turn `omo_notify` into HUD notices.
 2. **Two agent tools** in toolset `omo`:
    - `omo_status`: read-only. Is Omo Space running, what is on the board, and where this conversation lives.
-   - `omo_notify {text, level?}`: queue a short in-game toast (max 140 chars, redacted).
+   - `omo_notify {text, level?}`: queue a short in-game notice (max 140 chars, redacted): a HUD card and
+     a station toast.
 3. **`/omo`**: a one-paragraph answer to "where is this conversation in the world?"
 4. **`hermes omo`**:
    - `hermes omo setup [--enable-all] [--non-interactive] [--json]`: the guided checklist above.
@@ -82,7 +127,8 @@ The plugin adds:
      marker, the age of the last event, and which profiles on this machine have a feed, then gives one next step.
    - `hermes omo feed [-n N] [--json] [--follow]`: print or follow this profile's feed.
    - `hermes omo world [--install [WORLD] | --out DIR | --zip] [--list-worlds] [--dry-run] ...`:
-     generate the *Hermes HQ* datapack (one Hermes Computer desk per profile plus a Hermes Board wall).
+     generate the *Hermes HQ* datapack (one Omo Computer desk per profile plus a Hermes Board wall).
+     `--saves-dir` points `--install`/`--list-worlds` at a store instance's `saves/`.
      `--dry-run --json` prints the layout as data (bays, desks, stations, Board, regions); `worldgen.hall.Hall`
      gives the full block model for previews. In game the hall builds in a few staged ticks.
 
@@ -119,6 +165,11 @@ The plugin adds:
   `OMO_TAB` and `OMO_HERMES_TITLE`. Never message text, tool arguments, tool results, error
   messages, kanban summaries or subagent goals. The one exception is `omo_notify` text, which has
   control characters stripped, anything that looks like a secret masked, and is capped at 140 characters.
+- **On the Board (bridge side, omo-space PR #40):** `/board.json` carries status only: per agent profile,
+  platform, state, tool name, tool time, turns, age, workspace name and whether it is elsewhere. No session
+  ids, pids, models, titles or tool history. The text of `omo_notify` messages is off the wall Board unless
+  the bridge service runs with `OMO_BOARD_MESSAGES=1`. HUD notices draw only on your own screen
+  (`/omonotices off` hides them, e.g. on stream). Nothing from the feed is written into world data.
 - **Never:** reads secrets or credential files, spawns processes or threads, approves or blocks
   tools (`pre_tool_call` always returns `None`), injects context, patches Hermes, or touches a
   running game or bridge.
@@ -133,7 +184,7 @@ Set these in `plugins.entries.omo-space.settings` (the Desktop settings form sho
 |---|---|---|---|
 | `feed` | bool | `true` | Write the activity feed. |
 | `bridge_url` | str | `""` | Empty means `http://127.0.0.1:$OMO_PORT`, or `8780` if `OMO_PORT` is unset. Loopback only. |
-| `notify_on_finish` | bool | `false` | Queue a toast when a turn that took more than 60 s ends. |
+| `notify_on_finish` | bool | `false` | Queue a notice when a turn that took more than 60 s ends. |
 
 Settings are read live: a `hermes config set plugins.entries.omo-space.settings.<key> ...` takes
 effect on the next tool call, `/omo` or `hermes omo` run (hooks pick up `feed` /
@@ -177,6 +228,9 @@ treats it as stale (15 min, or when the pid is dead).
   (`post_compaction` arrived in v0.22.3; `kanban_task_*` in 0.18.0; `ctx.state` / `ctx.get_config` in
   0.20.1). Optional context APIs are still probed, so an older Hermes that ignores `requires_hermes`
   (it is enforced from 0.21.2) degrades instead of crashing.
+- **Omo Space:** v1.3 for desks (the Omo Computer), lamps and the Board wall; the bridge from omo-space
+  PR #40 (next release) for Board activity, Elsewhere and HUD notices. `tests/test_contract_pr40.py` reads
+  this plugin's feed with that bridge's own reader.
 - **OS:** Linux, macOS and Windows. The other-user port check reads `/proc/net` and only runs on
   Linux; elsewhere it is skipped. Omo data dirs follow Omo Space's `docs/PLATFORMS.md`:
   `~/.local/share/omo`, `~/Library/Application Support/OmoResearch`, `%LOCALAPPDATA%\OmoResearch`

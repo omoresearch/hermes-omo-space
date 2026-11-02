@@ -249,3 +249,56 @@ def test_notify_is_serialised_with_hooks(plugin, feed):
     t.join(5)
     with feed._lock:                              # re-entrant: a hook may call notify itself
         assert json.loads(plugin.tools.omo_notify({"text": "y"}, feed=feed))["queued"] is True
+
+
+# ---------------------------------------------------------------- status-only Board (omo-space PR #40)
+
+PR40_BOARD = {
+    "version": "1.3.0", "tmux": True, "uptime": 5, "screens": 1,
+    "workspaces": [{"name": "Lab", "kind": "hermes", "state": "live", "profile": "default",
+                    "tabs": [{"name": "Hermes", "kind": "hermes", "state": "live", "busy": True,
+                              "command": "hermes", "sleeping": False,
+                              "activity": {"state": "tool", "tool": "terminal", "turns": 2}}]}],
+    # BOARD_SESSION_KEYS + workspace/elsewhere: no session ids, pids, omo ids or models
+    "hermes": {"sessions": [{"profile": "default", "platform": "tui", "state": "tool", "tool": "terminal",
+                             "tool_for": 3, "turns": 2, "age": 1, "workspace": "Lab", "elsewhere": False},
+                            {"profile": "ops", "platform": "telegram", "state": "idle", "tool": None,
+                             "tool_for": None, "turns": 9, "age": 40, "workspace": None, "elsewhere": True}],
+               "events": [], "messages": False},
+}
+
+
+def test_status_reads_a_status_only_board(plugin, feed, fake_bridge, monkeypatch):
+    """PR #40's Board names no session ids: a session started in an Omo tab is still found by profile."""
+    fake_bridge.routes["/board.json"] = PR40_BOARD
+    monkeypatch.setenv("OMO_WORKSPACE", "ws1")
+    monkeypatch.setenv("OMO_TAB", "tab1")
+    out = json.loads(plugin.tools.omo_status({}, feed=feed, bridge_url=fake_bridge.url, session_id="s-main"))
+    assert out["this_session"]["where"] == "in-world" and out["this_session"]["workspace"] == "Lab"
+    assert out["board"]["hermes_sessions"] == 2 and out["board"]["elsewhere"] == 1
+
+
+def test_status_only_board_without_omo_ids_is_elsewhere(plugin, feed, fake_bridge):
+    fake_bridge.routes["/board.json"] = PR40_BOARD
+    out = json.loads(plugin.tools.omo_status({}, feed=feed, bridge_url=fake_bridge.url, session_id="s-main"))
+    assert out["this_session"]["where"] == "elsewhere" and out["this_session"]["workspace"] is None
+
+
+def test_status_only_board_ambiguous_profile_is_in_world_without_a_name(plugin, feed, fake_bridge, monkeypatch):
+    board = json.loads(json.dumps(PR40_BOARD))
+    board["hermes"]["sessions"].append(dict(board["hermes"]["sessions"][0], workspace="Studio"))
+    fake_bridge.routes["/board.json"] = board
+    monkeypatch.setenv("OMO_WORKSPACE", "ws1")
+    out = json.loads(plugin.tools.omo_status({}, feed=feed, bridge_url=fake_bridge.url, session_id="s-main"))
+    assert out["this_session"]["where"] == "in-world" and out["this_session"]["workspace"] is None
+
+
+def test_slash_text_on_a_status_only_board(plugin, feed, fake_bridge, monkeypatch):
+    monkeypatch.setenv("OMO_WORKSPACE", "ws1")
+    fake_bridge.routes["/board.json"] = PR40_BOARD
+    assert "at the 'Lab' desk" in plugin._slash_text(feed, fake_bridge.url, "s-main")
+    board = json.loads(json.dumps(PR40_BOARD))
+    board["hermes"]["sessions"].append(dict(board["hermes"]["sessions"][0], workspace="Studio"))
+    fake_bridge.routes["/board.json"] = board
+    text = plugin._slash_text(feed, fake_bridge.url, "s-main")
+    assert "at a desk in the world" in text and "None" not in text

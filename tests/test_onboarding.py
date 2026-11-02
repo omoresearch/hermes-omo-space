@@ -422,3 +422,35 @@ def test_setup_suggests_bridge_url_when_configured_one_is_dead(plugin, hermes_ho
     assert r["current_bridge_ok"] is False
     assert r["set_bridge_cmds"] == [["hermes", "-p", "default", "config", "set",
                                      "plugins.entries.omo-space.settings.bridge_url", fake_bridge.url]]
+
+
+def test_setup_names_omo_space_install_paths_when_missing(plugin, hermes_home, tmp_path, monkeypatch):
+    _profile(hermes_home)
+    monkeypatch.setenv("OMO_DATA", str(tmp_path / "no-omo"))
+    out = io.StringIO()
+    args = types.SimpleNamespace(enable_all=False, non_interactive=False, json=False)
+    plugin.onboarding.setup(args, _runtime(plugin, tmp_path), out=out, ask=_no_prompt, interactive=False,
+                            runner=_no_run)
+    text = " ".join(out.getvalue().split())
+    assert "install.sh --bridge-only" in text and "CurseForge" in text
+
+
+def test_setup_flags_a_bridge_without_feed_support(plugin, hermes_home, tmp_path, monkeypatch, fake_bridge):
+    _setup_env(plugin, hermes_home, tmp_path, monkeypatch, fake_bridge)
+    fake_bridge.routes["/board.json"] = {"version": "1.2.0", "workspaces": []}       # no "hermes" block
+    r = plugin.onboarding.setup_report(_runtime(plugin, tmp_path, bridge_url=fake_bridge.url))
+    assert r["bridge"]["feed_support"] is False
+    out = io.StringIO()
+    plugin.onboarding.print_checklist(r, out)
+    text = " ".join(out.getvalue().split())
+    assert "omoresearch/omo-space PR #40" in text and "next Omo Space release" in text
+
+
+def test_setup_quiet_about_feed_support_on_a_feed_aware_bridge(plugin, hermes_home, tmp_path, monkeypatch,
+                                                               fake_bridge):
+    _setup_env(plugin, hermes_home, tmp_path, monkeypatch, fake_bridge)
+    r = plugin.onboarding.setup_report(_runtime(plugin, tmp_path, bridge_url=fake_bridge.url))
+    assert r["bridge"]["feed_support"] is True
+    out = io.StringIO()
+    plugin.onboarding.print_checklist(r, out)
+    assert "PR #40" not in out.getvalue()

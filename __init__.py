@@ -2,7 +2,7 @@
 
 Registers (see plugin.yaml, which must list exactly these):
 - hooks that write a metadata-only activity feed into this plugin's own profile-scoped data dir;
-- tools ``omo_status`` (read-only bridge check) and ``omo_notify`` (queue an in-game toast), toolset ``omo``;
+- tools ``omo_status`` (read-only bridge check) and ``omo_notify`` (queue an in-game notice), toolset ``omo``;
 - the ``/omo`` slash command and the ``hermes omo setup|status|feed|world`` CLI.
 
 Requires Hermes v0.22.3+ (the first release with every hook used here; ``post_compaction`` landed in
@@ -101,8 +101,10 @@ def _slash_text(feed: Feed, bridge_url: Any, session_id: Any) -> str:
         bridge = f"The Omo Space bridge at {b['url']} is not yours: {b['error']}."
     else:
         bridge = f"Omo Space bridge is not reachable at {b['url']}."
-    if here["where"] == "in-world":
+    if here["where"] == "in-world" and here["workspace"]:
         where = f"This conversation lives at the '{here['workspace']}' desk in the world."
+    elif here["where"] == "in-world":
+        where = "This conversation lives at a desk in the world (the Board lists more than one for this profile)."
     elif here["omo_workspace"]:
         label = here["title"] or here["omo_workspace"]
         tab = f", tab {here['omo_tab']}" if here["omo_tab"] else ""
@@ -161,7 +163,7 @@ def register(ctx: Any) -> None:
     ctx.register_tool(name="omo_status", toolset="omo", schema=schemas.OMO_STATUS, handler=omo_status,
                       description="Is Omo Space running, and what is on the Hermes Board", emoji="🧱")
     ctx.register_tool(name="omo_notify", toolset="omo", schema=schemas.OMO_NOTIFY, handler=omo_notify,
-                      check_fn=notify_available, description="Show a short toast inside Omo Space", emoji="🔔")
+                      check_fn=notify_available, description="Show a short notice inside Omo Space", emoji="🔔")
 
     def slash_omo(raw_args: str = "", **kwargs: Any) -> str:
         try:

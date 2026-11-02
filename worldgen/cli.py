@@ -29,7 +29,7 @@ def add_parser(subparsers):
         "world",
         help="generate a Minecraft datapack (Hermes HQ) with one Hermes desk per profile",
         description="Inventory this Hermes install (names, models, counts only; never secrets) and write a "
-                    "Minecraft 26.2 datapack for Omo Space that builds 'Hermes HQ': one preset Hermes Computer "
+                    "Minecraft 26.2 datapack for Omo Space that builds 'Hermes HQ': one preset Omo Computer "
                     "desk per profile plus a Hermes Board web wall.",
     )
     p.add_argument("--out", default=None, help=f"output dir (default ./{DEFAULT_OUT}, or ./{DEFAULT_OUT}.zip with --zip)")

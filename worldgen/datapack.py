@@ -9,7 +9,7 @@ Format facts (checked against the 26.2 jar and the user's working packs):
 Omo blocks come from structure templates (`place template`), because only a
 template places a CC:T monitor wall that is already joined (Width/Height/
 XIndex/YIndex stored per panel), exactly like omo-space mod/tools/make_kits.py.
-Every Hermes Computer carries only an OmoPreset {Name, Kind, Profile, Tabs}:
+Every Omo Computer (omolife:hermes_computer) carries only an OmoPreset {Name, Kind, Profile, Tabs}:
 no Workspace / Station / WorkspaceName, so each player's copy makes its own
 workspace the first time the desk is opened.
 
@@ -227,7 +227,7 @@ def template_from(size, kcells):
 
 def desk_template(profile, theme=4):
     """7 x 5 x 2 desk kit (hall.kit_cells): themed frame with gold caps, a joined 5x3 terminal wall, the
-    Hermes Computer UNDER the screen in the frame row (touching only the bottom-middle panel), name plate and
+    Omo Computer UNDER the screen in the frame row (touching only the bottom-middle panel), name plate and
     status lamp on the desk either side of the open cell in front of the computer, glowing sign on top."""
     color = L.THEMES[theme][1]
     kc = H.kit_cells(theme, sign=(color, desk_sign_lines(profile)), preset=preset_for(profile))

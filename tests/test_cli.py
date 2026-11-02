@@ -186,6 +186,9 @@ def test_status_flags_a_bridge_without_feed_support(plugin, tmp_path, fake_bridg
     _run(plugin, rt, ["omo", "status"], monkeypatch)
     out = capsys.readouterr().out
     assert "predates Hermes feed support" in out.split("Next step", 1)[1]
+    step = " ".join(out.split("Next step", 1)[1].split())
+    assert "omoresearch/omo-space PR #40" in step and "next Omo Space release" in step
+    assert "launcher's update/repair" not in step
 
 
 def test_board_port_prefers_profile_setting_then_env_then_detected(plugin, tmp_path, monkeypatch):

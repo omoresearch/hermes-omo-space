@@ -1,5 +1,5 @@
 """Hermes HQ world generator: inventory a Hermes install (metadata only) and
-write a Minecraft 26.2 datapack that builds one preset Hermes Computer desk per
+write a Minecraft 26.2 datapack that builds one preset Omo Computer desk per
 profile plus a Hermes Board web wall.
 
 Stdlib only. Never reads secrets (.env, auth.json, state.db, tokens): see

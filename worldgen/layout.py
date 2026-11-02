@@ -31,7 +31,7 @@ import re
 
 # desk kit (template drawn facing south): frame row z 0, desk row z 1
 KIT_W, KIT_H, KIT_D = 7, 5, 2
-KIT_MID = 3                       # the Hermes Computer: under the screen, frame row
+KIT_MID = 3                       # the Omo Computer: under the screen, frame row
 SCREEN_W, SCREEN_H = 5, 3         # terminal wall above the computer (monitor limit 16 x 12)
 PLATE_T = (1, 1, 1)               # name plate on the desk, left of the open cell
 LAMP_T = (5, 1, 1)                # status lamp on the desk, right of the open cell

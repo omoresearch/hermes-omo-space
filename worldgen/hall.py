@@ -218,7 +218,7 @@ def moss_floor(x, z):
 
 def kit_cells(st, sign=None, preset=None):
     """The 7 x 5 x 2 desk kit (drawn facing south): {(x, y, z): (spec, nbt)}.
-    Frame row z 0: themed back + posts with gold caps, the 5 x 3 terminal wall, the Hermes Computer UNDER the
+    Frame row z 0: themed back + posts with gold caps, the 5 x 3 terminal wall, the Omo Computer UNDER the
     screen (touching only the bottom-middle panel); desk row z 1: slabs, name plate + status lamp, the cell in
     front of the computer left open, a glowing sign on the top beam. Monitors carry nbt {'wall': (i, j, w, h)}."""
     m = MAT[st]

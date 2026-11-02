@@ -323,6 +323,18 @@ def _health_url(base: str) -> Optional[dict]:
     return data if isinstance(data, dict) and data.get("ok", True) else None
 
 
+def _feed_support(base: Optional[str]) -> Optional[bool]:
+    """True when the bridge's /board.json has the ``hermes`` block (it reads Hermes feeds: Omo Space
+    PR #40 and later), False when it answers without one, None when it cannot be asked."""
+    if not base:
+        return None
+    try:
+        board = tools.fetch_json(tools.resolve_bridge_url(base), "/board.json")
+    except Exception:  # noqa: BLE001
+        return None
+    return "hermes" in board if isinstance(board, dict) else None
+
+
 def _health(port: int) -> Optional[dict]:
     return _health_url(f"http://127.0.0.1:{port}")
 
@@ -411,6 +423,8 @@ def setup_report(runtime: Any) -> dict:
     if url and url != current and not current_ok:
         set_cmds.append(["hermes", "-p", runtime.profile, "config", "set",
                          f"plugins.entries.{PLUGIN_KEY}.settings.bridge_url", url])
+    if bridge["port"]:
+        bridge["feed_support"] = _feed_support(current if current_ok else url)
     profiles = profiles_report(root)
     saves = saves_dir()
     return {"profile": runtime.profile, "hermes_root": str(root), "omo_data": str(data),
@@ -427,15 +441,22 @@ def print_checklist(r: dict, out) -> None:
 
     print(f"Omo Space setup (profile: {r['profile']})", file=out)
     line(r["omo_data_exists"], f"Omo Space data dir {_short(r['omo_data'])}"
-         + ("" if r["omo_data_exists"] else " not found: install Omo Space first (https://github.com/omoresearch/omo-space)"))
+         + ("" if r["omo_data_exists"] else " not found: install Omo Space first: its launcher, or the mod from "
+                                         "CurseForge/Modrinth/Prism plus `install.sh --bridge-only` "
+                                         "(https://github.com/omoresearch/omo-space#install)"))
     b = r["bridge"]
     if b["port"]:
         who = "yours" if b["owner"] == "mine" else "reachable"
         src = "service file" if b["source"] not in ("OMO_PORT", "scan") else b["source"]
         line(True, f"Omo bridge {who} at {r['bridge_url']} (v{b['version']}, found via {src})")
+        if b.get("feed_support") is False:
+            line(None, "this bridge does not read Hermes feeds yet: desks and the Board wall work; Board "
+                       "activity and HUD notices need the bridge from omoresearch/omo-space PR #40, coming "
+                       "in the next Omo Space release")
     else:
         line(False, "Omo bridge not found on OMO_PORT, the launcher's service file or ports 8780-8789: "
-                    "open Omo Space (or start its bridge) and run this again")
+                    "open Omo Space (store installs: start the bridge from `install.sh --bridge-only`) "
+                    "and run this again")
     for f in b["foreign"]:
         line(None, f"port {f['port']} belongs to another user's Omo bridge; ignored")
     if r.get("current_bridge_ok"):

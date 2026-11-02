@@ -254,7 +254,19 @@ def locate_session(feed: Optional[Feed], board: Optional[dict], session_id: Any)
                     and (not omo.get("tab") or o.get("tab") == omo.get("tab")):
                 name = s["workspace"]
                 break
-    if name:
+    in_world = bool(name)
+    if not in_world and omo and omo.get("workspace") and sessions \
+            and not any("session_id" in s or "omo" in s for s in sessions):
+        # A status-only Board (Omo Space PR #40) names no session or Omo ids. This process was
+        # started in an Omo tab, so it is in the world; name the workspace when only one in-world
+        # session of this profile is on the Board.
+        prof = (feed.profile if feed is not None else None) or "default"
+        names = {s["workspace"] for s in sessions if s.get("workspace") and not s.get("elsewhere")
+                 and (s.get("profile") or "default") == prof and s.get("state") != "ended"}
+        if names:
+            in_world = True
+            name = names.pop() if len(names) == 1 else None
+    if in_world:
         where = "in-world"
     elif omo and omo.get("workspace") and board is None:
         where = "unknown (bridge not reachable)"
@@ -315,6 +327,8 @@ def omo_notify(args: Any = None, *, feed: Optional[Feed] = None, **kwargs: Any) 
             return json.dumps({"queued": False, "error": f"could not write the feed: {feed.last_error}",
                                "event": event})
         return json.dumps({"queued": True, "event": event,
-                           "note": "Shown as a toast in Omo Space if the bridge is running."})
+                           "note": ("Shown in Omo Space as a HUD notice and a station toast when the bridge "
+                                    "reads Hermes feeds (Omo Space PR #40, next release); on the Board "
+                                    "only with OMO_BOARD_MESSAGES=1.")})
     except Exception as exc:  # noqa: BLE001
         return json.dumps({"queued": False, "error": f"omo_notify failed: {type(exc).__name__}"})
