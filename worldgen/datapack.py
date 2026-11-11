@@ -417,8 +417,13 @@ def clear_commands(hall):
     return cmds
 
 
-def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48):
-    """{relative path: bytes} for the whole datapack."""
+def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48, theme_order=None, arrival=None):
+    """{relative path: bytes} for the whole datapack.
+
+    ``arrival`` (used by ``hermes omo create`` for a world it made itself): a dict with ``origin``
+    [x, y, z] (the build origin, a block on the flat ground), ``title`` and optional ``time``
+    (``time set`` value). Adds a load/tick hook that, the first time a player joins, puts them in
+    front of the arch and builds the hall once. Without it the pack only builds on /function."""
     if not NAMESPACE_RE.match(namespace or "") or namespace in RESERVED_NAMESPACES:
         raise ValueError(f"bad namespace {namespace!r}: use 1-48 chars of a-z 0-9 _")
     port = int(bridge_port)
@@ -429,7 +434,7 @@ def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48):
     if not profiles:
         raise ValueError("no Hermes profiles to build")
     shown, hidden = profiles[:max_desks], profiles[max_desks:]
-    lay = L.plan_layout(len(shown), [p["name"] for p in shown])
+    lay = L.plan_layout(len(shown), [p["name"] for p in shown], theme_order=theme_order)
     ns = namespace
     tag, origin, building, clearing = ns, ns + "_origin", ns + "_building", ns + "_clearing"
     url = f"http://127.0.0.1:{port}/board"
@@ -589,11 +594,52 @@ def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48):
     info.append(say("gray", f"Commands: /function {ns}:preview, {ns}:build, {ns}:clear, {ns}:info"))
     fn("info", info)
 
+    if arrival:
+        files.update(arrival_files(ns, arrival, lay, len(shown), exists))
+
     files["pack.mcmeta"] = (json.dumps({"pack": {
         "pack_format": PACK_FORMAT, "min_format": PACK_FORMAT, "max_format": PACK_FORMAT,
         "description": clean(f"Hermes HQ v2: {len(shown)} Hermes desks + Hermes Board ({ns})", 120)}},
         indent=1, ensure_ascii=True) + "\n").encode("ascii")
     return dict(sorted(files.items()))
+
+
+def arrival_files(ns, arrival, lay, ndesks, exists):
+    """First-join hook for a world `hermes omo create` made: build once, greet, face the arch."""
+    ox, oy, oz = (int(v) for v in arrival["origin"])
+    h = lay["hall"]
+    title = clean(arrival.get("title") or "Hermes HQ", 40)
+    obj = (ns + "_st")[:16]
+    files = {}
+
+    def fn(name, lines):
+        files[f"data/{ns}/function/{name}.mcfunction"] = ("\n".join(lines) + "\n").encode("ascii")
+
+    files["data/minecraft/tags/function/load.json"] = (json.dumps({"values": [f"{ns}:arrival_load"]}) + "\n").encode()
+    files["data/minecraft/tags/function/tick.json"] = (json.dumps({"values": [f"{ns}:arrival_tick"]}) + "\n").encode()
+    fn("arrival_load", [f"scoreboard objectives add {obj} dummy"])
+    fn("arrival_tick", [f"execute as @a[tag=!{ns}_arrived] at @s run function {ns}:arrival_join"])
+    look = f"{ox + 0.5} {oy} {oz - 9.5} facing {ox + 0.5} {oy + 4} {oz + 20}"
+    fn("arrival_join", [
+        f"tag @s add {ns}_arrived",
+        f"tp @s {look}",
+        f"execute if score #built {obj} matches 1.. run return 0",
+        f"scoreboard players set #built {obj} 1",
+        *( [f"time set {int(arrival['time'])}"] if arrival.get("time") is not None else [] ),
+        f"forceload add {ox + h['x0']} {oz + h['z0']} {ox + h['x1']} {oz + h['z1']}",
+        f"title @s times 10 70 20",
+        f"title @s subtitle {jtext(comp(f'{ndesks} agents are moving in...', 'gray', 60))}",
+        f"title @s title {jtext(comp(title, 'gold', 40, bold=True))}",
+        f"schedule function {ns}:arrival_build 60t",
+    ])
+    fn("arrival_build", [
+        f"execute unless entity {exists} positioned {ox} {oy} {oz} run function {ns}:build_at",
+        "playsound minecraft:block.beacon.activate master @a ~ ~ ~ 0.6 1.2",
+        "tellraw @a " + jtext([comp("Welcome home. ", "gold", 20, bold=True),
+                               comp("Walk through the arch. Each desk is one of your Hermes profiles: "
+                                    "right-click its Omo Computer once to open it.", "white", 200)]),
+    ])
+    return files
 
 
 # --------------------------------------------------------------------------- output

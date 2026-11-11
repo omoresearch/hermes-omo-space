@@ -162,16 +162,18 @@ def _choose(nbays, bd):
     return nback, (rest + 1) // 2, rest // 2
 
 
-def plan_layout(n, names=None):
+def plan_layout(n, names=None, theme_order=None):
     """Positions for n desks (n >= 1): hall box, regions, bays, desks, Board, garden.
-    `names` (profile names, desk order) drives the neighbourhood grouping."""
+    `names` (profile names, desk order) drives the neighbourhood grouping; `theme_order` (bay theme
+    numbers, see THEMES) is the palette the bays cycle through (default THEME_ORDER)."""
+    order = [t for t in (theme_order or THEME_ORDER) if t in THEMES] or THEME_ORDER
     n = max(1, min(int(n), HARD_MAX_DESKS))
     names = [str(x) for x in (names or [])][:n]
     names += [f"agent{i}" for i in range(len(names), n)]
     groups = _groups(names)
     bays = []
     for gi, (key, label, idx) in enumerate(groups):
-        theme = THEME_ORDER[gi % len(THEME_ORDER)]
+        theme = order[gi % len(order)]
         for part in _chunks(idx, BAY_CAP):
             bays.append({"group": key, "label": label, "theme": theme, "theme_name": THEMES[theme][0],
                          "color": THEMES[theme][1], "desks": part})

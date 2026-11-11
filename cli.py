@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, TextIO
 
-from . import onboarding, tools
+from . import create, onboarding, tools
 from .feed import Feed
 
 EVENT_FILES = ("events.1.jsonl", "events.jsonl")
@@ -58,7 +58,8 @@ def add_install_arguments(p: argparse.ArgumentParser) -> argparse.ArgumentParser
 
 
 def setup_parser(subparser: argparse.ArgumentParser) -> None:
-    subs = subparser.add_subparsers(dest="omo_command", metavar="{setup,status,feed,world}")
+    subs = subparser.add_subparsers(dest="omo_command", metavar="{create,setup,status,feed,world}")
+    create.add_parser(subs)
     se = subs.add_parser("setup", help="Guided checklist: Omo Space, bridge port, profiles, Hermes HQ world")
     se.add_argument("--enable-all", action="store_true",
                     help="offer to enable omo-space in every other profile (asks first; needs a terminal)")
@@ -105,6 +106,11 @@ def board_port(runtime: Runtime, detect: Any = None) -> tuple[Optional[int], str
 
 def run(args: argparse.Namespace, runtime: Runtime) -> int:
     sub = getattr(args, "omo_command", None)
+    if sub == "create":
+        port = None
+        if getattr(args, "bridge_port", None) is None:
+            port, _ = board_port(runtime)
+        return create.run(args, board_port=port)
     if sub == "setup":
         return onboarding.setup(args, runtime, world_cli=_load_world_cli())
     if sub == "status":
@@ -126,7 +132,8 @@ def run(args: argparse.Namespace, runtime: Runtime) -> int:
         if getattr(args, "install", None) is not None or getattr(args, "list_worlds", False):
             return onboarding.world_install(args, world_cli)
         return world_cli.run(args) or 0
-    print("usage: hermes omo {setup,status,feed,world}\n"
+    print("usage: hermes omo {create,setup,status,feed,world}\n"
+          "  create   answer a few questions, get a new world with your Hermes HQ built in\n"
           "  setup    guided checklist: Omo Space, bridge port, profiles, Hermes HQ world\n"
           "  status   doctor: bridge, feed, marker, last event, profiles, next step\n"
           "  feed     print this profile's activity feed (-n N, --json, --follow)\n"
