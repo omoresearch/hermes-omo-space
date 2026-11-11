@@ -664,6 +664,9 @@ def arrival_files(ns, arrival, lay, ndesks, exists, vanilla=False):
     fn("arrival_build", [
         f"execute unless entity {exists} positioned {ox} {oy} {oz} run function {ns}:build_at",
         "playsound minecraft:block.beacon.activate master @a ~ ~ ~ 0.6 1.2",
+        "tellraw @a " + jtext([comp("New to Minecraft? ", "gold", 20),
+                               comp("W A S D walk · mouse looks · Space jumps (twice to fly) · right-click uses · "
+                                    "Esc pauses", "gray", 200)]),
         "tellraw @a " + jtext([comp("Welcome home. ", "gold", 20, bold=True),
                                comp("Walk through the arch. Each desk is one of your Hermes profiles"
                                     + (", named on its sign. Open the world in Omo Space to make the screens "

@@ -84,6 +84,13 @@ def hermes_root(tmp_path, monkeypatch):
     return root
 
 
+@pytest.fixture(autouse=True)
+def no_launcher(plugin, monkeypatch):
+    """Never start a real game app from a test."""
+    monkeypatch.setattr(plugin.firsttime, "launcher_command", lambda vanilla, **k: None)
+    monkeypatch.setattr(plugin.firsttime, "open_game", lambda vanilla: False)
+
+
 @pytest.fixture
 def saves(tmp_path):
     d = tmp_path / "saves"
@@ -145,7 +152,7 @@ def test_designed_world_is_built(plugin, hermes_home, saves):
     assert "Quiet stacks." in join and "Snow Library" in join
     info = (pack / "data/hermes_hq/function/info.mcfunction").read_text()
     assert "Stacks" in info and "Reading Nook" in info
-    assert "Ready" in out
+    assert "Your world is ready" in out and "W A S D" in out
 
 
 def test_no_model_falls_back_to_names(plugin, hermes_home, saves):
@@ -260,3 +267,37 @@ def test_pick_target(plugin, tmp_path):
     path, van = ob.pick_target(None, home=home, platform="linux", env={})
     assert not van and path == home / ".local/share/omo/runtime/game/saves"
     assert ob.pick_target(None, "minecraft", home=home, platform="linux", env={})[1] is True
+
+
+def test_open_last_and_first_timer_text(plugin, hermes_home, saves, monkeypatch):
+    rc, out, _ = _run(plugin, ["--saves-dir", str(saves), "--yes"], llm=fake_llm(GOOD_PLAN))
+    assert rc == 0 and "Double-click \"Snow Library\"" in out and "W A S D" in out
+    buf = io.StringIO()
+    assert plugin.create.open_last(out=buf, interactive=False) == 0
+    text = buf.getvalue()
+    assert "Snow Library" in text and ("Singleplayer" in text or "Java Edition" in text)
+
+
+def test_open_game_asked_and_started(plugin, hermes_home, saves, monkeypatch):
+    started = []
+    monkeypatch.setattr(plugin.firsttime, "launcher_command", lambda vanilla, **k: ["true"])
+    monkeypatch.setattr(plugin.firsttime, "open_game", lambda vanilla: started.append(vanilla) or True)
+    rc, out, _ = _run(plugin, ["--saves-dir", str(saves)], ask=["", "", ""], interactive=True,
+                      llm=fake_llm(GOOD_PLAN))
+    assert rc == 0 and started == [False] and "Opening Omo Space" in out
+
+
+def test_no_game_installed_explains_what_to_get(plugin, hermes_home, tmp_path, monkeypatch):
+    omo_saves = tmp_path / "nothing" / "saves"
+    monkeypatch.setattr(plugin.onboarding, "pick_target", lambda s, t="auto", **k: (omo_saves, False))
+    monkeypatch.setattr(plugin.onboarding, "omo_data_dir", lambda *a, **k: tmp_path / "nothing-here")
+    rc, out, _ = _run(plugin, ["--yes"], llm=fake_llm(GOOD_PLAN))
+    assert rc == 0 and "Minecraft Java Edition account" in out and "Omo Space" in out
+    assert (omo_saves / "Snow Library" / "level.dat").is_file()
+
+
+def test_vanilla_without_minecraft_refuses(plugin, hermes_home, tmp_path, monkeypatch):
+    monkeypatch.setattr(plugin.onboarding, "pick_target",
+                        lambda s, t="auto", **k: (tmp_path / "no-mc" / ".minecraft" / "saves", True))
+    rc, _, err = _run(plugin, ["--for", "minecraft", "--yes"], llm=fake_llm(GOOD_PLAN))
+    assert rc == 1 and "isn't installed" in err and not (tmp_path / "no-mc").exists()

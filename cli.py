@@ -61,6 +61,7 @@ def add_install_arguments(p: argparse.ArgumentParser) -> argparse.ArgumentParser
 def setup_parser(subparser: argparse.ArgumentParser) -> None:
     subs = subparser.add_subparsers(dest="omo_command", metavar="<command>")
     create.add_parser(subs)
+    subs.add_parser("open", help="How to get into your world (and open the game)")
     se = subs.add_parser("setup", help="Checklist: Omo Space, bridge, which profiles have the plugin")
     se.add_argument("--enable-all", action="store_true",
                     help="offer to enable omo-space in every other profile (asks first; needs a terminal)")
@@ -112,6 +113,8 @@ def run(args: argparse.Namespace, runtime: Runtime) -> int:
         if getattr(args, "bridge_port", None) is None:
             port, _ = board_port(runtime)
         return create.run(args, board_port=port, llm=runtime.llm)
+    if sub == "open":
+        return create.open_last()
     if sub == "setup":
         return onboarding.setup(args, runtime, world_cli=_load_world_cli())
     if sub == "status":
@@ -143,6 +146,7 @@ def run(args: argparse.Namespace, runtime: Runtime) -> int:
 HOME_TEXT = """Omo Space for Hermes
 
   hermes omo create    design and build a world with your agents in it (start here)
+  hermes omo open      how to get into your world (and open the game)
   hermes omo status    is Omo Space running, is this profile showing up
 
 More: hermes omo setup (checklist for every profile), hermes omo world (datapack for an existing world),

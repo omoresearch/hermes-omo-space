@@ -1,23 +1,12 @@
-# Omo Space for Hermes (`omo-space`)
+# Omo Space for Hermes
 
-**Your whole Hermes system, as a building in Minecraft.** Every Hermes profile gets a desk in a
-generated *Hermes HQ*, a glowing cavern hall (pond, waterfalls, glow tree, a big HERMES sign over the arch)
-whose themed bays group profiles that share a prefix (`omo-*`, `yt-*` ...) into neighbourhoods, inside
-[Omo Space](https://github.com/omoresearch/omo-space) (the Omo Research Minecraft world with Omo Computers,
-terminals and web walls). Each desk is an **Omo Computer** set to that profile, and the **Hermes Board** on the
-wall shows what every session is doing: CLI, TUI, Telegram and other gateway chats, cron jobs, subagents and
-kanban workers.
+**Tell Hermes what kind of world you'd like. It designs a Minecraft world for your agents and builds it.**
+Every Hermes profile gets a desk with a wall of screens, in rooms named for what your agents actually do.
+In [Omo Space](https://github.com/omoresearch/omo-space) those screens are live: walk up to a desk,
+right-click, and talk to that agent. A Hermes Board on the wall shows what every session is doing.
 
-> **Status.** Desks, status lamps and the Board wall work with Omo Space v1.3 today. Hermes activity on the
-> Board, the *Elsewhere* list and HUD notices need the feed-aware bridge from
-> [omoresearch/omo-space PR #40](https://github.com/omoresearch/omo-space/pull/40), **coming in the next Omo
-> Space release**. The plugin already writes the feed that bridge reads.
-
-<!-- Screenshots: real in-game shots are being captured to /data/yifan/hermes-omo-plugin/e2e/shots/;
-     copy the chosen ones to docs/ in this repo and pin them in the catalog entry. -->
-| Hermes HQ, one desk per profile | The Hermes Board wall |
-|---|---|
-| ![Hermes HQ hall](docs/hermes-hq-hall.png) | ![Hermes Board](docs/hermes-board.png) |
+No Minecraft experience needed: the plugin tells you what to get, opens the game for you, and shows the
+five keys you need.
 
 ## Quickstart
 
@@ -26,25 +15,58 @@ hermes plugins install omoresearch/hermes-omo-space --enable
 hermes omo
 ```
 
-`hermes omo` asks one thing: **what kind of world do you want?** Type anything ("a cosy library in the
-snow", "neon night city") or just press Enter and Hermes gets creative. Your own model then designs the
-world from your profiles: a name, a look, and rooms named for what your agents actually do (an *Edit Bay*,
-a *Research Den*, a *Watch Tower*), every profile at a desk with a wall of screens.
+That's it. `hermes omo` asks one question, **what kind of world would you like?** Describe it in your
+own words ("a little treehouse village in a forest") or just press Enter and Hermes surprises you.
+Your own model then designs it from your Hermes profiles: a name, a look, and rooms named for what your
+agents actually do, each agent at a desk with a wall of screens. You see the plan first:
 
 ```
-  ◆ Snowbound Stacks   Snow outside, lamplight within: every agent at its desk.
-    Old Library · snowfield · night
+  ◆ Mossbough Hollow   Lanterns sway between the branches; your crew is already up the ladders.
+    Cherry Blossom · meadow · morning
 
-    Edit Bay         9  Six editors, their boss and the Chinese localizer · floor3-editing-editor…
-    Research Den    10  Scouting virals, ideas, briefs and scripts · floor3-idea-room, …
-    Watch Tower      2  Keeping the machines and services healthy · floor5-agent-ops, …
+    Lookout Nest     2  Keeping watch over the machine, terminals and agents · default, floor5-ag…
+    Canopy Council   1  Weekly reviews, commitments and kanban triage · omo-00-chief-of-staff
+    Acorn Archive    2  Mining streams for long-form video ideas · lf-01-ideas, yt-01-video-resea…
+    Bark Edit Bay    1  Cutting each long-form video to its plan · yt-03-editing
 
-    Enter build it   a another idea   q quit   or type what to change
+    Happy with it? Enter builds it.  a = a different idea,  q = quit,
+    or type what to change, e.g. "make it night" or "put the editors together".
 ```
 
-Press Enter and it writes a new world. Open Omo Space → Singleplayer → your world, and the building rises
-around you as you arrive. Right-click any desk to talk to that agent. The Hermes Board on the wall shows
-what every session is doing.
+Press Enter and the world is made. Then it tells you exactly how to get in, offers to open the game for
+you, and shows the five keys you need:
+
+```
+  ◆ Your world is ready. To go in:
+    1. Open Omo Space. Press Play (sign in with Microsoft the first time).
+    2. Click Singleplayer.
+    3. Double-click "Mossbough Hollow".
+    4. You arrive at the front door and the building rises around you.
+
+    Getting around (first time in Minecraft? this is all you need)
+    W A S D      walk
+    mouse        look around
+    Space        jump (press twice to fly, you're in creative mode)
+    right-click  use a desk's computer: talk to that agent
+    Esc          pause, settings, or let go of the mouse
+```
+
+You can also just ask Hermes in any chat (Desktop, Telegram, ...): *"build me a world for my agents,
+something cosy"*. The `omo_create_world` tool does the same thing.
+
+### Never played Minecraft?
+
+You need two things, both one-off:
+
+1. **A Minecraft Java Edition account** (bought once from [minecraft.net](https://www.minecraft.net/)).
+2. **Omo Space**, free: it brings its own Minecraft, so there is nothing else to set up
+   ([install](https://github.com/omoresearch/omo-space#install)).
+
+You can run `hermes omo` before either: the world is saved and waits, and `hermes omo open` shows the
+steps again whenever you're ready. Worlds are always new folders; nothing you already have is touched.
+
+**Already play Minecraft but not Omo Space?** It notices and builds for plain Minecraft 26.2 instead: the
+same building, with dark glass where the live screens would be (`--for minecraft` to choose it).
 
 Unattended: `hermes omo create "a forest studio" --yes` (or `--json`). No model? `--no-ai` plans rooms
 from your profile names.
@@ -170,6 +192,8 @@ The plugin adds:
 - **The world designer** (`hermes omo` / `create`, only when you run it) sends your wish plus each profile's
   name and its `profile.yaml` display name/description to **your own active model** through Hermes'
   `ctx.llm` (no keys handled by the plugin). Never chats, memories, config values or secrets. `--no-ai` skips it.
+- **Opening the game** (`hermes omo open`, or after a build) starts the Omo Space app or the Minecraft
+  Launcher only after you answer yes at a terminal; never from the agent tool or without a terminal.
 - **No telemetry, no accounts, no secrets.** Nothing is reported anywhere; there is nothing to opt into.
 - **Reads outside its own dir:** `hermes omo setup` reads each profile's `plugins.enabled` /
   `plugins.disabled` and plugin dir names (to show where omo-space is on), the Omo launcher's service

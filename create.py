@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from . import design, onboarding
+from . import design, firsttime, onboarding
 
 ORIGIN = (0, -60, 0)            # build origin on the flat ground (feet y -60)
 SPAWN = (0, -60, -10)           # 10 blocks in front of the arch, facing it
@@ -190,6 +190,11 @@ def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[.
             print(line, file=out)
 
     saves, vanilla = onboarding.pick_target(args.saves_dir, getattr(args, "target", "auto") or "auto")
+    if not args.saves_dir and vanilla and not saves.parent.is_dir():
+        print(f"error: Minecraft isn't installed here ({saves.parent} not found). Leave out --for minecraft and the "
+              "world is saved for Omo Space instead, which brings its own Minecraft.", file=err)
+        return 1
+    no_game = not args.saves_dir and not vanilla and not onboarding.omo_data_dir().is_dir()
     root = Path(args.hermes_root).expanduser() if args.hermes_root else inv.hermes_root()
     data = inv.collect(root, only=args.profiles, exclude=args.exclude)
     profiles = data["profiles"][:MAX_DESKS]
@@ -203,23 +208,25 @@ def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[.
         llm = None
 
     try:
+        n = len(profiles)
         say("")
         say(f"  {p('◆', p.GOLD)} {p('Omo Space', p.BOLD)}   {p('a world for your Hermes agents', p.DIM)}")
-        say(f"    Your {len(profiles)} profile{'s' if len(profiles) != 1 else ''} each get a desk with screens, "
-            "in rooms Hermes designs.")
+        if n == 1:
+            say("    Hermes will build you a small Minecraft world with a desk for your agent.")
+        else:
+            say(f"    Hermes will build you a Minecraft world where each of your {n} agents (profiles) has a desk,")
+            say("    grouped into rooms by what they do.")
+        say(p("    You'll see the plan before anything is made. Ctrl+C stops at any time.", p.DIM))
         if vanilla:
-            say(p("    Building for plain Minecraft: the full building, screens as dark glass. Open it in Omo Space",
-                  p.DIM))
-            say(p("    (https://github.com/omoresearch/omo-space) to make every screen a live agent you can talk to.",
-                  p.DIM))
-        elif not args.saves_dir and not saves.is_dir():
-            say(p(f"    Omo Space isn't installed yet; the world will wait in {saves}.", p.DIM))
+            say(p("    (For plain Minecraft: the full building, screens as dark glass. In Omo Space every screen", p.DIM))
+            say(p("    is a live agent you can talk to.)", p.DIM))
 
         wish = " ".join(args.wish or []).strip()
         if interactive and not wish:
             say("")
-            say(f"    {p('What kind of world do you want?', p.BOLD)}  {p('Enter = surprise me', p.DIM)}")
-            say(p("    e.g.  a cosy library in the snow  ·  neon night city  ·  quiet forest studio", p.DIM))
+            say(f"    {p('What kind of world would you like?', p.BOLD)}  {p('Describe it in your own words,', p.DIM)}")
+            say(p("    or just press Enter and Hermes will surprise you.", p.DIM))
+            say(p("    e.g.  a cosy library in the snow  ·  a sunny beach office  ·  a quiet forest studio", p.DIM))
             wish = ask(f"    {p('›', p.GOLD)} ").strip()
 
         def make(prev=None, change=""):
@@ -237,8 +244,9 @@ def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[.
             if not interactive:
                 break
             say("")
-            say(f"    {p('Enter', p.BOLD)} build it   {p('a', p.BOLD)} another idea   "
-                f"{p('q', p.BOLD)} quit   {p('or type what to change', p.DIM)}")
+            say(f"    Happy with it? {p('Enter', p.BOLD)} builds it.  {p('a', p.BOLD)} = a different idea,  "
+                f"{p('q', p.BOLD)} = quit,")
+            say(p("    or type what to change, e.g. \"make it night\" or \"put the editors together\".", p.DIM))
             choice = ask(f"    {p('›', p.GOLD)} ").strip()
             low = choice.lower()
             if low in ("", "y", "yes", "b", "build"):
@@ -295,10 +303,86 @@ def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[.
         print(json.dumps(result, indent=1), file=out)
         return 0
     say("")
-    game = "Minecraft 26.2" if vanilla else "Omo Space"
-    say(f"  {p('◆', p.GOLD)} {p('Ready.', p.BOLD)} Open {game} → Singleplayer → {p(name, p.GOLD)}")
-    say("    The building rises around you as you arrive."
-        + (" Each desk carries its agent's name." if vanilla else " Right-click a desk to talk to that agent."))
+    remember_last(world, vanilla)
+    if no_game:
+        say(f"  {p('◆', p.GOLD)} {p('Your world is ready.', p.BOLD)}")
+        for line in firsttime.no_game_text(saves)[:-1]:
+            say("    " + line)
+        return 0
+    say(f"  {p('◆', p.GOLD)} {p('Your world is ready. To go in:', p.BOLD)}")
+    for line in firsttime.open_steps(name, vanilla):
+        say("    " + line)
+    say("")
+    say(f"    {p('Getting around', p.BOLD)} {p('(first time in Minecraft? this is all you need)', p.DIM)}")
+    for line in firsttime.controls_lines():
+        say("  " + line)
+    if interactive and firsttime.launcher_command(vanilla):
+        game = "the Minecraft Launcher" if vanilla else "Omo Space"
+        try:
+            yes = ask(f"\n    Open {game} now? [Y/n] ").strip().lower() in ("", "y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            yes = False
+        if yes:
+            say(f"    {p('✓', p.GREEN)} Opening {game}…" if firsttime.open_game(vanilla)
+                else f"    Couldn't open {game}; start it from your apps menu.")
+    else:
+        say("")
+        say(p("    Later: `hermes omo open` shows these steps again and opens the game.", p.DIM))
+    return 0
+
+
+LAST_FILE = "last-world.json"
+
+
+def _state_dir() -> Path:
+    try:
+        from hermes_constants import get_hermes_home  # type: ignore
+        base = Path(get_hermes_home())
+    except Exception:  # noqa: BLE001
+        base = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
+    return base / "plugin-data" / "omo-space"
+
+
+def remember_last(world: Path, vanilla: bool) -> None:
+    try:
+        d = _state_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        (d / LAST_FILE).write_text(json.dumps({"path": str(world), "name": world.name, "vanilla": vanilla}))
+    except OSError:
+        pass
+
+
+def open_last(out=None, ask: Callable[[str], str] = input, interactive: Optional[bool] = None) -> int:
+    """``hermes omo open``: how to get into the last world you made, and (if you say yes) open the game."""
+    out = out or sys.stdout
+    p = Paint(_tty(out))
+    try:
+        last = json.loads((_state_dir() / LAST_FILE).read_text())
+    except (OSError, ValueError):
+        print("No world yet. Make one with: hermes omo", file=out)
+        return 1
+    name, vanilla = last.get("name", "your world"), bool(last.get("vanilla"))
+    print(f"\n  {p('◆', p.GOLD)} {p(name, p.BOLD)}", file=out)
+    if not vanilla and not onboarding.omo_data_dir().is_dir():
+        for line in firsttime.no_game_text(Path(last.get("path", "")).parent):
+            print("    " + line, file=out)
+        return 0
+    for line in firsttime.open_steps(name, vanilla):
+        print("    " + line, file=out)
+    print("", file=out)
+    for line in firsttime.controls_lines():
+        print("  " + line, file=out)
+    if interactive is None:
+        interactive = onboarding.is_interactive()
+    game = "the Minecraft Launcher" if vanilla else "Omo Space"
+    if interactive and firsttime.launcher_command(vanilla):
+        try:
+            yes = ask(f"\n    Open {game} now? [Y/n] ").strip().lower() in ("", "y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            yes = False
+        if yes:
+            print(f"    Opening {game}…" if firsttime.open_game(vanilla) else
+                  f"    Couldn't open {game}; start it from your apps menu.", file=out)
     return 0
 
 
