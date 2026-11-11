@@ -31,6 +31,7 @@ class Runtime:
     feed: Feed
     bridge_url_setting: Any = ""
     profile: str = "default"
+    llm: Any = None              # ctx.llm.complete_structured, when this Hermes has plugin LLM access
 
 
 # --------------------------------------------------------------------------- argparse
@@ -58,16 +59,16 @@ def add_install_arguments(p: argparse.ArgumentParser) -> argparse.ArgumentParser
 
 
 def setup_parser(subparser: argparse.ArgumentParser) -> None:
-    subs = subparser.add_subparsers(dest="omo_command", metavar="{create,setup,status,feed,world}")
+    subs = subparser.add_subparsers(dest="omo_command", metavar="<command>")
     create.add_parser(subs)
-    se = subs.add_parser("setup", help="Guided checklist: Omo Space, bridge port, profiles, Hermes HQ world")
+    se = subs.add_parser("setup", help="Checklist: Omo Space, bridge, which profiles have the plugin")
     se.add_argument("--enable-all", action="store_true",
                     help="offer to enable omo-space in every other profile (asks first; needs a terminal)")
     se.add_argument("--non-interactive", action="store_true", help="print the checklist only, never prompt")
     se.add_argument("--json", action="store_true", help="print the checklist data as JSON")
-    st = subs.add_parser("status", help="Doctor: is Omo Space reachable and is this profile's feed healthy?")
+    st = subs.add_parser("status", help="Is Omo Space running, and is this profile showing up?")
     st.add_argument("--json", action="store_true", help="Print machine-readable JSON")
-    fd = subs.add_parser("feed", help="Print this profile's Omo activity feed (metadata only)")
+    fd = subs.add_parser("feed", help="This profile's activity feed (metadata only)")
     fd.add_argument("-f", "--follow", action="store_true", help="Keep printing new events (Ctrl+C to stop)")
     fd.add_argument("--json", action="store_true", help="Print raw JSON lines")
     fd.add_argument("-n", "--lines", type=int, default=20, metavar="N", help="How many recent events (default 20)")
@@ -77,7 +78,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
         if isinstance(world, argparse.ArgumentParser):
             add_install_arguments(world)
     else:
-        subs.add_parser("world", help="Generate the Hermes HQ datapack (world generator not installed)")
+        subs.add_parser("world", help="Hermes HQ datapack for an existing world (generator not installed)")
 
 
 def board_port(runtime: Runtime, detect: Any = None) -> tuple[Optional[int], str]:
@@ -110,7 +111,7 @@ def run(args: argparse.Namespace, runtime: Runtime) -> int:
         port = None
         if getattr(args, "bridge_port", None) is None:
             port, _ = board_port(runtime)
-        return create.run(args, board_port=port)
+        return create.run(args, board_port=port, llm=runtime.llm)
     if sub == "setup":
         return onboarding.setup(args, runtime, world_cli=_load_world_cli())
     if sub == "status":
@@ -132,13 +133,20 @@ def run(args: argparse.Namespace, runtime: Runtime) -> int:
         if getattr(args, "install", None) is not None or getattr(args, "list_worlds", False):
             return onboarding.world_install(args, world_cli)
         return world_cli.run(args) or 0
-    print("usage: hermes omo {create,setup,status,feed,world}\n"
-          "  create   answer a few questions, get a new world with your Hermes HQ built in\n"
-          "  setup    guided checklist: Omo Space, bridge port, profiles, Hermes HQ world\n"
-          "  status   doctor: bridge, feed, marker, last event, profiles, next step\n"
-          "  feed     print this profile's activity feed (-n N, --json, --follow)\n"
-          "  world    generate the Hermes HQ Minecraft datapack (--install [WORLD] puts it in a save)")
+    if onboarding.is_interactive():
+        # bare `hermes omo` at a terminal: straight into the one thing most people want
+        return create.run(create.default_args(), board_port=board_port(runtime)[0], llm=runtime.llm)
+    print(HOME_TEXT)
     return 0
+
+
+HOME_TEXT = """Omo Space for Hermes
+
+  hermes omo create    design and build a world with your agents in it (start here)
+  hermes omo status    is Omo Space running, is this profile showing up
+
+More: hermes omo setup (checklist for every profile), hermes omo world (datapack for an existing world),
+hermes omo feed (this profile's activity feed). Add --help to any of them."""
 
 
 # --------------------------------------------------------------------------- feed reading

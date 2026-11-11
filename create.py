@@ -1,39 +1,32 @@
-"""``hermes omo create``: a few questions in the terminal, then a new Omo Space world with your Hermes
-HQ already standing in it.
+"""``hermes omo`` / ``hermes omo create``: describe the world you want (or let Hermes be creative),
+Hermes designs it from your profiles, you look at the plan, and it builds a new Omo Space world with
+every profile at a desk in its own room.
 
-Feels like ``hermes setup``: numbered steps, Hermes' own arrow-key menus (``hermes_cli.curses_ui``)
-when Hermes is importable at a terminal, plain numbered prompts otherwise, and a flag for every
-question so it also runs unattended (``--yes`` / ``--json``; no TTY implies the defaults).
+    1. "What kind of world?"        free text; Enter = be creative
+    2. Hermes designs it             your active model via ctx.llm (profile names + descriptions only)
+    3. The plan                      name, look, rooms and who sits where
+       Build it / Another idea / Change something
+    4. Built                         a NEW world folder + the Hermes HQ datapack inside it
 
-It writes exactly two things: a NEW world folder under the saves dir (an existing one is never
-touched) and the Hermes HQ datapack inside it. The pack carries a first-join hook, so the hall builds
-itself around you the first time you open the world: nothing to type in game.
+The pack builds the hall around you the first time you open the world: nothing to type in game.
+Without a model (old Hermes, offline, --no-ai) the plan comes from your profile names instead.
+Every step has a flag (wish words, --yes, --json) so it also runs unattended; no TTY implies --yes.
 """
 
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from . import onboarding
+from . import design, onboarding
 
-# key, label, blurb, bay theme order (worldgen.layout.THEMES numbers)
-STYLES = [
-    ("falls", "Omo Falls", "glowing cavern, prismarine and cherry bays", [4, 2, 1, 5, 6, 8, 3, 7]),
-    ("blossom", "Cherry Blossom", "soft pinks, purpur and white quartz", [2, 8, 7, 1, 4, 6, 3, 5]),
-    ("library", "Old Library", "dark oak, bookshelves, warm copper", [3, 5, 1, 6, 2, 4, 8, 7]),
-    ("studio", "Clean Studio", "quartz, birch and glass, bright and calm", [7, 1, 4, 8, 2, 6, 3, 5]),
-    ("forge", "Copper Forge", "deepslate, copper and tuff, moody", [5, 6, 3, 4, 1, 2, 7, 8]),
-]
-GROUNDS = [("grass", "Meadow", "green grass to the horizon"), ("snow", "Snowfield", "quiet and white"),
-           ("sand", "Desert", "warm sand"), ("stone", "Stone plaza", "smooth stone, very tidy")]
-TIMES = [("morning", "Morning", 1000), ("noon", "Noon", 6000), ("sunset", "Golden hour", 12000),
-         ("night", "Night", 18000)]
 ORIGIN = (0, -60, 0)            # build origin on the flat ground (feet y -60)
 SPAWN = (0, -60, -10)           # 10 blocks in front of the arch, facing it
 MAX_DESKS = 96
@@ -41,18 +34,8 @@ NS = onboarding.DEFAULT_NAMESPACE
 
 
 # --------------------------------------------------------------------------- colour
-def _use_color(stream) -> bool:
-    if os.environ.get("NO_COLOR"):
-        return False
-    try:
-        return bool(stream.isatty())
-    except Exception:  # noqa: BLE001
-        return False
-
-
 class Paint:
-    GOLD, DIM, BOLD, GREEN, CYAN, RED, RESET = "\033[38;5;179m", "\033[2m", "\033[1m", "\033[32m", "\033[36m", \
-        "\033[31m", "\033[0m"
+    GOLD, DIM, BOLD, GREEN, RESET = "\033[38;5;179m", "\033[2m", "\033[1m", "\033[32m", "\033[0m"
 
     def __init__(self, on: bool):
         self.on = on
@@ -61,89 +44,41 @@ class Paint:
         return "".join(codes) + text + self.RESET if self.on and codes else text
 
 
+def _tty(stream) -> bool:
+    try:
+        return bool(stream.isatty()) and not os.environ.get("NO_COLOR")
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # --------------------------------------------------------------------------- argparse
 def add_parser(subs: Any) -> argparse.ArgumentParser:
     p = subs.add_parser(
-        "create", help="Create a new Omo Space world with your Hermes HQ built in (guided)",
-        description="Answer a few questions; get a new Omo Space world where every Hermes profile is a desk "
-                    "in a building. Open the world and walk in: it builds itself around you.")
-    p.add_argument("--name", help="world name (default: Hermes HQ)")
-    p.add_argument("--style", choices=[s[0] for s in STYLES], help="building style")
-    p.add_argument("--ground", choices=[g[0] for g in GROUNDS], help="the land around it")
-    p.add_argument("--time", choices=[t[0] for t in TIMES], help="time of day (it stays there)")
+        "create", help="Design and build a world with your Hermes agents in it (start here)",
+        description="Say what kind of world you want (or nothing, and Hermes gets creative). Hermes designs it "
+                    "from your profiles, shows you the plan, and builds a new Omo Space world where every "
+                    "profile has a desk with screens in its own room.")
+    p.add_argument("wish", nargs="*", help="what kind of world, e.g. a cosy library in the snow")
+    p.add_argument("--name", help="world name (default: the one Hermes picks)")
     p.add_argument("--profiles", help="only these profiles (comma separated; default: all)")
     p.add_argument("--exclude", help="leave these profiles out (comma separated)")
+    p.add_argument("--no-ai", action="store_true", help="plan rooms from profile names, without the model")
     p.add_argument("--saves-dir", help="Minecraft saves dir (default: Omo Space's)")
     p.add_argument("--bridge-port", type=int, default=None, help="Omo bridge port for the Board wall")
     p.add_argument("--hermes-root", default=None, help="Hermes root (default $HERMES_ROOT or ~/.hermes)")
-    p.add_argument("-y", "--yes", action="store_true", help="ask nothing: use the flags and defaults")
+    p.add_argument("-y", "--yes", action="store_true", help="build the first plan without asking")
     p.add_argument("--json", action="store_true", help="machine-readable result (implies --yes)")
     return p
 
 
-# --------------------------------------------------------------------------- prompts
-class Prompter:
-    """Hermes' arrow-key menus when available at a terminal, numbered input otherwise."""
-
-    def __init__(self, out, paint: Paint, ask: Callable[[str], str] = input, use_curses: bool = False):
-        self.out, self.p, self.ask = out, paint, ask
-        self._radio = self._check = None
-        if use_curses:
-            try:
-                from hermes_cli.curses_ui import curses_checklist, curses_radiolist  # type: ignore
-                self._radio, self._check = curses_radiolist, curses_checklist
-            except Exception:  # noqa: BLE001
-                pass
-
-    def _echo(self, label: str) -> None:
-        print(f"    {self.p('›', self.p.GOLD)} {label}", file=self.out)
-
-    def choose(self, title: str, items: list[tuple[str, str]], default: int = 0) -> int:
-        """items: (label, blurb)."""
-        if self._radio is not None:
-            rows: list[Any] = [[(f"{a}", None), (f"  {b}", "dim")] if b else a for a, b in items]
-            i = self._radio(title, rows, selected=default, cancel_returns=-1)
-            if i is None or i < 0:
-                raise KeyboardInterrupt
-            self._echo(items[i][0])
-            return i
-        w = max(len(a) for a, _ in items)
-        for n, (a, b) in enumerate(items, 1):
-            mark = self.p(" (default)", self.p.DIM) if n - 1 == default else ""
-            print(f"    {n}. {a.ljust(w)}  {self.p(b, self.p.DIM)}{mark}", file=self.out)
-        while True:
-            raw = self.ask(f"    Choose 1-{len(items)} [{default + 1}]: ").strip()
-            if not raw:
-                self._echo(items[default][0])
-                return default
-            if raw.isdigit() and 1 <= int(raw) <= len(items):
-                self._echo(items[int(raw) - 1][0])
-                return int(raw) - 1
-            print(self.p("    Type one of the numbers above.", self.p.DIM), file=self.out)
-
-    def pick_many(self, title: str, items: list[str], selected: set[int]) -> set[int]:
-        if self._check is not None:
-            return set(self._check(title, items, set(selected), cancel_returns=set(selected)))
-        for n, it in enumerate(items, 1):
-            print(f"    {n}. {it}", file=self.out)
-        raw = self.ask("    Enter keeps all; or type the numbers to keep (e.g. 1,3): ").strip()
-        if not raw:
-            return set(selected)
-        keep = {int(x) - 1 for x in raw.replace(" ", ",").split(",") if x.isdigit() and 0 < int(x) <= len(items)}
-        return keep or set(selected)
-
-    def text(self, question: str, default: str) -> str:
-        raw = self.ask(f"    {question} [{default}]: ").strip()
-        val = raw or default
-        self._echo(val)
-        return val
-
-    def confirm(self, question: str) -> bool:
-        raw = self.ask(f"\n    {question} [Y/n]: ").strip().lower()
-        return raw in ("", "y", "yes")
+def default_args() -> argparse.Namespace:
+    """Args for a bare `hermes omo`."""
+    parser = argparse.ArgumentParser(prog="hermes omo")
+    add_parser(parser.add_subparsers(dest="omo_command"))
+    return parser.parse_args(["create"])
 
 
-# --------------------------------------------------------------------------- helpers
+# --------------------------------------------------------------------------- bits
 def _unique_name(saves: Path, base: str, newworld: Any) -> str:
     name, n = base, 2
     while (saves / newworld.folder_name(name)).exists():
@@ -151,31 +86,44 @@ def _unique_name(saves: Path, base: str, newworld: Any) -> str:
     return name
 
 
-def neighbourhoods(names: list[str]) -> list[tuple[str, str, list[int]]]:
-    """[(key, label, desk indices)] the way the hall groups them into bays."""
-    from .worldgen import layout as lay
-    return lay._groups(names)
+def _spin(out, paint: Paint, text: str, fn: Callable[[], Any], live: bool) -> Any:
+    """Run fn() while a small spinner line ticks (only at a terminal)."""
+    if not live:
+        return fn()
+    done = threading.Event()
+    box: dict = {}
+
+    def work():
+        try:
+            box["v"] = fn()
+        except BaseException as exc:  # noqa: BLE001
+            box["e"] = exc
+        finally:
+            done.set()
+
+    threading.Thread(target=work, daemon=True).start()
+    t0 = time.time()
+    for ch in itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"):
+        if done.wait(0.1):
+            break
+        out.write(f"\r    {paint(ch, paint.GOLD)} {text} {paint(f'{time.time() - t0:.0f}s', paint.DIM)}  ")
+        out.flush()
+    out.write("\r\033[K")
+    out.flush()
+    if "e" in box:
+        raise box["e"]
+    return box.get("v")
 
 
-def _hood_line(names: list[str]) -> str:
-    return " · ".join(f"{label} {len(idx)}" for _, label, idx in neighbourhoods(names))
-
-
-def _bay_line(bays: list[dict]) -> str:
-    """'omo-* 5 bays, purpur · lf-* cherry': one entry per neighbourhood, in hall order."""
-    seen: dict[str, list] = {}
-    for b in bays:
-        seen.setdefault(b["label"], [0, b["theme_name"]])[0] += 1
-    return " · ".join(f"{k} ({t}{f', {n} bays' if n > 1 else ''})" for k, (n, t) in seen.items())
-
-
-def _icon_png(style_i: int) -> bytes:
-    """A 64x64 world icon: the style's two bay colours as a soft diagonal with a gold H mark."""
+def _icon_png(themes: list[str]) -> bytes:
+    """64x64 world icon: the first two room colours as a soft diagonal, ink panel, gold H."""
     import struct
     import zlib
-    pal = {1: (226, 196, 120), 2: (233, 160, 190), 3: (140, 96, 60), 4: (70, 140, 140), 5: (190, 110, 70),
-           6: (120, 150, 90), 7: (220, 225, 230), 8: (170, 120, 190)}
-    a, b = pal[STYLES[style_i][3][0]], pal[STYLES[style_i][3][1]]
+    pal = {"birch": (226, 196, 120), "cherry": (233, 160, 190), "library": (140, 96, 60),
+           "prismarine": (70, 140, 140), "copper": (190, 110, 70), "tuff": (120, 150, 90),
+           "quartz": (220, 225, 230), "purpur": (170, 120, 190)}
+    a = pal.get(themes[0] if themes else "", pal["prismarine"])
+    b = pal.get(themes[1] if len(themes) > 1 else "", pal["cherry"])
     ink, gold = (28, 26, 24), (222, 178, 76)
     H = ["#..#", "#..#", "####", "#..#", "#..#"]
     rows = []
@@ -198,10 +146,26 @@ def _icon_png(style_i: int) -> bytes:
             + chunk(b"IDAT", zlib.compress(b"".join(rows), 9)) + chunk(b"IEND", b""))
 
 
+def show_plan(plan: dict, say: Callable[[str], None], p: Paint, width: int = 100) -> None:
+    look = (f"{design.STYLES[plan['style']][0]} · {design.GROUNDS[plan['ground']].lower()} · "
+            f"{design.TIMES[plan['time']][0].lower()}")
+    say("")
+    say(f"  {p('◆', p.GOLD)} {p(plan['name'], p.BOLD)}"
+        + (f"   {p(plan['tagline'], p.DIM)}" if plan.get("tagline") else ""))
+    say(f"    {p(look, p.DIM)}")
+    say("")
+    nw = max(len(r["name"]) for r in plan["rooms"])
+    for r in plan["rooms"]:
+        line = ((r["about"] + " · ") if r.get("about") else "") + ", ".join(r["profiles"])
+        room_w = max(24, width - nw - 12)
+        if len(line) > room_w:
+            line = line[:room_w - 1] + "…"
+        say(f"    {r['name'].ljust(nw)}  {p(str(len(r['profiles'])).rjust(2), p.GOLD)}  {p(line, p.DIM)}")
+
+
 # --------------------------------------------------------------------------- the command
-def run(args: Any, *, board_port: Optional[int] = None, out=None, err=None,
-        ask: Callable[[str], str] = input, interactive: Optional[bool] = None,
-        use_curses: Optional[bool] = None) -> int:
+def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[..., Any]] = None,
+        out=None, err=None, ask: Callable[[str], str] = input, interactive: Optional[bool] = None) -> int:
     out = out or sys.stdout
     err = err or sys.stderr
     try:
@@ -214,9 +178,9 @@ def run(args: Any, *, board_port: Optional[int] = None, out=None, err=None,
     quiet = bool(args.json)
     if interactive is None:
         interactive = onboarding.is_interactive()
-    interactive = interactive and not (args.yes or quiet)
-    p = Paint(_use_color(out) and not quiet)
-    pr = Prompter(out, p, ask=ask, use_curses=interactive if use_curses is None else use_curses)
+    interactive = bool(interactive) and not (args.yes or quiet)
+    live = _tty(out) and not quiet
+    p = Paint(live)
 
     def say(line: str = "") -> None:
         if not quiet:
@@ -225,127 +189,101 @@ def run(args: Any, *, board_port: Optional[int] = None, out=None, err=None,
     saves = Path(args.saves_dir).expanduser() if args.saves_dir else onboarding.saves_dir()
     root = Path(args.hermes_root).expanduser() if args.hermes_root else inv.hermes_root()
     data = inv.collect(root, only=args.profiles, exclude=args.exclude)
-    profiles = data["profiles"]
+    profiles = data["profiles"][:MAX_DESKS]
     if not profiles:
         print(f"error: no Hermes profiles found under {root}"
               + (" matching --profiles/--exclude" if args.profiles or args.exclude else ""), file=err)
         return 1
     for m in data.get("missing") or []:
         print(f"warning: no profile named {m!r}", file=err)
-
-    steps = [s for s, ask_it in (("name", not args.name), ("style", not args.style), ("ground", not args.ground),
-                                 ("time", not args.time),
-                                 ("desks", not args.profiles and len(profiles) > 1)) if ask_it]
-    total = len(steps)
-
-    def header(key: str, title: str) -> None:
-        n = steps.index(key) + 1
-        say()
-        say(f"  {p(f'{n}/{total}', p.DIM)}  {p(title, p.BOLD)}")
+    if args.no_ai:
+        llm = None
 
     try:
-        names = [x["name"] for x in profiles]
-        say()
-        say(f"  {p('◆', p.GOLD)} {p('Omo Space', p.BOLD)} {p('· build your Hermes HQ', p.DIM)}")
-        say(f"    {len(profiles)} Hermes profile{'s' if len(profiles) != 1 else ''} found  "
-            f"{p(_hood_line(names), p.DIM)}")
-        say("    Each one becomes a desk in a building you can walk around.")
-        if interactive and total:
-            say(p(f"    {total} quick question{'s' if total != 1 else ''}. Enter keeps the default; Ctrl+C stops "
-                  "without writing anything.", p.DIM))
+        say("")
+        say(f"  {p('◆', p.GOLD)} {p('Omo Space', p.BOLD)}   {p('a world for your Hermes agents', p.DIM)}")
+        say(f"    Your {len(profiles)} profile{'s' if len(profiles) != 1 else ''} each get a desk with screens, "
+            "in rooms Hermes designs.")
+        if not args.saves_dir and not saves.is_dir():
+            say(p(f"    Omo Space isn't installed yet; the world will wait in {saves}.", p.DIM))
 
-        name = args.name or _unique_name(saves, "Hermes HQ", newworld)
-        if interactive and "name" in steps:
-            header("name", "Name your world")
-            name = pr.text("World name", name)
+        wish = " ".join(args.wish or []).strip()
+        if interactive and not wish:
+            say("")
+            say(f"    {p('What kind of world do you want?', p.BOLD)}  {p('Enter = surprise me', p.DIM)}")
+            say(p("    e.g.  a cosy library in the snow  ·  neon night city  ·  quiet forest studio", p.DIM))
+            wish = ask(f"    {p('›', p.GOLD)} ").strip()
 
-        style_i = next((i for i, s in enumerate(STYLES) if s[0] == args.style), 0)
-        if interactive and "style" in steps:
-            header("style", "Pick a building style")
-            style_i = pr.choose("Building style", [(s[1], s[2]) for s in STYLES], style_i)
+        def make(prev=None, change=""):
+            label = "Reworking the plan…" if change else "Hermes is designing your world…"
+            return _spin(out, p, label, lambda: design.design(profiles, wish, llm, previous=prev, change=change),
+                         live)
 
-        ground_i = next((i for i, g in enumerate(GROUNDS) if g[0] == args.ground), 0)
-        if interactive and "ground" in steps:
-            header("ground", "The land around it")
-            ground_i = pr.choose("The land around it", [(g[1], g[2]) for g in GROUNDS], ground_i)
-
-        time_i = next((i for i, t in enumerate(TIMES) if t[0] == args.time), 1)
-        if interactive and "time" in steps:
-            header("time", "Time of day")
-            time_i = pr.choose("Time of day (it stays there)", [(t[1], "") for t in TIMES], time_i)
-
-        if interactive and "desks" in steps:
-            header("desks", "Who moves in")
-            hoods = neighbourhoods(names)
-            items = [f"{label}  ({len(idx)}: {', '.join(names[i] for i in idx[:3])}{'…' if len(idx) > 3 else ''})"
-                     for _, label, idx in hoods]
-            keep = pr.pick_many("Neighbourhoods that get desks (SPACE toggles, ENTER confirms)", items,
-                                set(range(len(hoods))))
-            kept_idx = sorted(i for h, (_, _, idx) in enumerate(hoods) if h in keep for i in idx)
-            if kept_idx:
-                profiles = [profiles[i] for i in kept_idx]
-            say(f"    {p('›', p.GOLD)} {len(profiles)} desk{'s' if len(profiles) != 1 else ''}")
-
-        if len(profiles) > MAX_DESKS:
-            say(p(f"    The hall holds {MAX_DESKS} desks; the first {MAX_DESKS} profiles move in.", p.DIM))
-            profiles = profiles[:MAX_DESKS]
-        names = [x["name"] for x in profiles]
-        style, ground, tod = STYLES[style_i], GROUNDS[ground_i], TIMES[time_i]
-
-        from .worldgen import layout as lay
-        L = lay.plan_layout(len(profiles), names, theme_order=style[3])
-        w, h, d = L["size"]
-        say()
-        say(f"  {p('Your world', p.BOLD)}")
-        rows = [("Name", name), ("Style", f"{style[1]} on {ground[1].lower()}, {tod[1].lower()}"),
-                ("Building", f"{len(profiles)} desks in {len(L['bays'])} bays, {w} × {d} blocks"),
-                ("Bays", _bay_line(L["bays"])),
-                ("Saved to", str(saves / newworld.folder_name(name)))]
-        for k, v in rows:
-            say(f"    {p(k.ljust(9), p.DIM)} {v}")
-        if interactive and not pr.confirm("Create it?"):
-            say("    Nothing written.")
-            return 0
+        plan, source = make()
+        while True:
+            if args.name:
+                plan["name"] = args.name
+            show_plan(plan, say, p)
+            if source == "fallback" and llm is not None:
+                say(p("    (No answer from the model, so rooms follow your profile names.)", p.DIM))
+            if not interactive:
+                break
+            say("")
+            say(f"    {p('Enter', p.BOLD)} build it   {p('a', p.BOLD)} another idea   "
+                f"{p('q', p.BOLD)} quit   {p('or type what to change', p.DIM)}")
+            choice = ask(f"    {p('›', p.GOLD)} ").strip()
+            low = choice.lower()
+            if low in ("", "y", "yes", "b", "build"):
+                break
+            if low in ("q", "quit", "n", "no", "exit"):
+                say("    Nothing written.")
+                return 0
+            if low in ("a", "another", "again"):
+                plan, source = make()
+            else:
+                plan, source = make(plan, choice)
     except (KeyboardInterrupt, EOFError):
         print("\n    Stopped; nothing written.", file=out)
         return 130
 
+    name = args.name or _unique_name(saves, plan["name"], newworld)
+    index = {pr["name"]: i for i, pr in enumerate(profiles)}
+    order = [index[n] for r in plan["rooms"] for n in r["profiles"]]
+    ordered = [profiles[i] for i in order]
+    rooms, k = [], 0
+    for r in plan["rooms"]:
+        rooms.append({"name": r["name"], "theme": design.THEMES[r["theme"]], "about": r.get("about", ""),
+                      "desks": list(range(k, k + len(r["profiles"])))})
+        k += len(r["profiles"])
+    tod = design.TIMES[plan["time"]][1]
     port = args.bridge_port or board_port or 8780
+
+    say("")
     t0 = time.time()
-    say()
     try:
-        files = dp.build_files(dict(data, profiles=profiles), namespace=NS, bridge_port=port, max_desks=MAX_DESKS,
-                               theme_order=style[3],
-                               arrival={"origin": list(ORIGIN), "title": name, "time": tod[2]})
-    except ValueError as exc:
-        print(f"error: {exc}", file=err)
-        return 2
-    say(f"    {p('✓', p.GREEN)} Laid out {len(profiles)} desks and the Hermes Board")
-    try:
-        world = newworld.create_world(saves, name, ground=ground[0], time=tod[2], spawn=SPAWN)
-    except (newworld.WorldError, OSError) as exc:
+        files = dp.build_files(dict(data, profiles=ordered), namespace=NS, bridge_port=port, max_desks=MAX_DESKS,
+                               rooms=rooms, arrival={"origin": list(ORIGIN), "title": name, "time": tod,
+                                                     "tagline": plan.get("tagline", "")})
+        world = newworld.create_world(saves, name, ground=plan["ground"], time=tod, spawn=SPAWN)
+    except (ValueError, newworld.WorldError, OSError) as exc:
         print(f"error: {exc}", file=err)
         return 1
     try:
-        (world / "icon.png").write_bytes(_icon_png(style_i))
+        (world / "icon.png").write_bytes(_icon_png([r["theme"] for r in plan["rooms"]]))
         dp.write_output(files, world / "datapacks" / NS)
+        (world / "omo-plan.json").write_text(json.dumps(dict(plan, name=name), indent=1) + "\n")
     except (dp.OutputError, OSError) as exc:
         print(f"error: could not finish the world at {world}: {exc}", file=err)
         return 1
-    say(f"    {p('✓', p.GREEN)} Made the world \"{name}\" ({ground[1].lower()}, cheats on, creative)")
-    say(f"    {p('✓', p.GREEN)} Packed Hermes HQ into it ({len(files)} files, {time.time() - t0:.1f}s)")
+    say(f"    {p('✓', p.GREEN)} {len(rooms)} rooms, {len(ordered)} desks with screens, the Hermes Board")
+    say(f"    {p('✓', p.GREEN)} New world \"{name}\" ({time.time() - t0:.1f}s)")
 
-    result = {"world": world.name, "path": str(world), "name": name, "style": style[0], "ground": ground[0],
-              "time": tod[0], "desks": len(profiles), "bays": len(L["bays"]), "size": L["size"],
-              "profiles": names, "board_url": f"http://127.0.0.1:{port}/board"}
+    result = {"world": world.name, "path": str(world), "plan": dict(plan, name=name), "designed_by": source,
+              "desks": len(ordered), "board_url": f"http://127.0.0.1:{port}/board"}
     if quiet:
         print(json.dumps(result, indent=1), file=out)
         return 0
-    say()
-    say(f"  {p('◆', p.GOLD)} {p('Ready. Go and see it:', p.BOLD)}")
-    say(f"    1. Open Omo Space → Singleplayer → {p(name, p.GOLD)}")
-    say("    2. You arrive at the arch and the hall rises around you (a few seconds).")
-    say("    3. Walk in. Right-click a desk's Omo Computer once to open that profile.")
-    say()
-    say(p(f"    In game: /function {NS}:info lists every desk · Board wall: {result['board_url']}", p.DIM))
+    say("")
+    say(f"  {p('◆', p.GOLD)} {p('Ready.', p.BOLD)} Open Omo Space → Singleplayer → {p(name, p.GOLD)}")
+    say("    The building rises around you as you arrive. Right-click a desk to talk to that agent.")
     return 0

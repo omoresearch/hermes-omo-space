@@ -162,21 +162,29 @@ def _choose(nbays, bd):
     return nback, (rest + 1) // 2, rest // 2
 
 
-def plan_layout(n, names=None, theme_order=None):
+def plan_layout(n, names=None, theme_order=None, rooms=None):
     """Positions for n desks (n >= 1): hall box, regions, bays, desks, Board, garden.
     `names` (profile names, desk order) drives the neighbourhood grouping; `theme_order` (bay theme
-    numbers, see THEMES) is the palette the bays cycle through (default THEME_ORDER)."""
+    numbers, see THEMES) is the palette the bays cycle through (default THEME_ORDER).
+    `rooms` (from the world designer) replaces the prefix grouping: [{"name", "theme": THEMES number,
+    "desks": [desk indices]}], each desk in exactly one room, rooms in hall order."""
     order = [t for t in (theme_order or THEME_ORDER) if t in THEMES] or THEME_ORDER
     n = max(1, min(int(n), HARD_MAX_DESKS))
     names = [str(x) for x in (names or [])][:n]
     names += [f"agent{i}" for i in range(len(names), n)]
-    groups = _groups(names)
+    if rooms:
+        groups = [(f"room{i}", str(r["name"]), [d for d in r["desks"] if 0 <= d < n]) for i, r in enumerate(rooms)]
+        groups = [g for g in groups if g[2]]
+        forced = {f"room{i}": r.get("theme") for i, r in enumerate(rooms)}
+    else:
+        groups, forced = _groups(names), {}
     bays = []
     for gi, (key, label, idx) in enumerate(groups):
-        theme = order[gi % len(order)]
+        theme = forced.get(key) if forced.get(key) in THEMES else order[gi % len(order)]
         for part in _chunks(idx, BAY_CAP):
             bays.append({"group": key, "label": label, "theme": theme, "theme_name": THEMES[theme][0],
-                         "color": THEMES[theme][1], "desks": part})
+                         "color": THEMES[theme][1], "desks": part,
+                         "about": str((rooms[int(key[4:])].get("about") if rooms else "") or "")})
     bd = bay_depth(max(len(b["desks"]) for b in bays))
     nback, nleft, nright = _choose(len(bays), bd)
     nside = max(nleft, nright)

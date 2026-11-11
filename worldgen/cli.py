@@ -27,7 +27,7 @@ def _default_port():
 def add_parser(subparsers):
     p = subparsers.add_parser(
         "world",
-        help="generate a Minecraft datapack (Hermes HQ) with one Hermes desk per profile",
+        help="Hermes HQ datapack for a world you already have",
         description="Inventory this Hermes install (names, models, counts only; never secrets) and write a "
                     "Minecraft 26.2 datapack for Omo Space that builds 'Hermes HQ': one preset Omo Computer "
                     "desk per profile plus a Hermes Board web wall.",

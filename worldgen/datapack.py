@@ -417,7 +417,8 @@ def clear_commands(hall):
     return cmds
 
 
-def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48, theme_order=None, arrival=None):
+def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48, theme_order=None, arrival=None,
+                rooms=None):
     """{relative path: bytes} for the whole datapack.
 
     ``arrival`` (used by ``hermes omo create`` for a world it made itself): a dict with ``origin``
@@ -434,7 +435,7 @@ def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48, the
     if not profiles:
         raise ValueError("no Hermes profiles to build")
     shown, hidden = profiles[:max_desks], profiles[max_desks:]
-    lay = L.plan_layout(len(shown), [p["name"] for p in shown], theme_order=theme_order)
+    lay = L.plan_layout(len(shown), [p["name"] for p in shown], theme_order=theme_order, rooms=rooms)
     ns = namespace
     tag, origin, building, clearing = ns, ns + "_origin", ns + "_building", ns + "_clearing"
     url = f"http://127.0.0.1:{port}/board"
@@ -473,12 +474,15 @@ def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48, the
     labels.append(text_display([0.5, L.BOARD_H + 0.25, bd["monitor_z"] - 0.4],
                                [comp("HERMES BOARD", "gold", 20, bold=True), comp(url, "gray", 60, pre="\n")],
                                tag, scale=0.6))
-    title = [comp("HERMES HQ", "gold", 20, bold=True),
+    title = [comp((arrival or {}).get("title") or "HERMES HQ", "gold", 32, bold=True),
              comp(f"{len(shown)} agents \u00b7 one desk per Hermes profile", "white", 60, pre="\n")]
     labels.append(text_display([0.5, 5.2, 0.3], title, tag, scale=0.7, line_width=260))
     for b in lay["bays"]:
         sx, sz = b["signpost"]
-        labels.append(text_display([sx + 0.5, 2.6, sz + 0.5], [comp(b["label"], CHAT[b["color"]], 40, bold=True)], tag, scale=0.8))
+        room = [comp(b["label"], CHAT[b["color"]], 40, bold=True)]
+        if b.get("about"):
+            room.append(comp(b["about"], "gray", 60, pre="\n", bold=False))
+        labels.append(text_display([sx + 0.5, 2.6, sz + 0.5], room, tag, scale=0.8, line_width=180))
 
     # ---- build: stage 0 runs at once, the rest via schedule from the origin marker (no lag spike)
     body = build_commands(hall, ns, tag)
@@ -628,7 +632,7 @@ def arrival_files(ns, arrival, lay, ndesks, exists):
         *( [f"time set {int(arrival['time'])}"] if arrival.get("time") is not None else [] ),
         f"forceload add {ox + h['x0']} {oz + h['z0']} {ox + h['x1']} {oz + h['z1']}",
         f"title @s times 10 70 20",
-        f"title @s subtitle {jtext(comp(f'{ndesks} agents are moving in...', 'gray', 60))}",
+        f"title @s subtitle {jtext(comp(arrival.get('tagline') or f'{ndesks} agents are moving in...', 'gray', 80))}",
         f"title @s title {jtext(comp(title, 'gold', 40, bold=True))}",
         f"schedule function {ns}:arrival_build 60t",
     ])

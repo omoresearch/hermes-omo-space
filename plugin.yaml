@@ -5,16 +5,21 @@ version: "0.1.0"
 author: Omo Research
 license: MIT
 description: >
-  See your whole Hermes system (profiles, CLI/TUI/gateway sessions, subagents, cron, kanban) as a
+  `hermes omo`: say what kind of world you want (or let it be creative) and your model designs a Minecraft
+  world for your agents, every profile at a desk with screens in rooms named for what they do; it is
+  written as a new Omo Space world that builds itself when you open it. The designer sends only your wish
+  and profile names/descriptions to your own active model via ctx.llm.
+  Also: see your whole Hermes system (profiles, CLI/TUI/gateway sessions, subagents, cron, kanban) as a
   place inside Omo Space, the Omo Research Minecraft world. Hooks write a metadata-only activity feed
   (session/turn/tool starts and ends, kanban transitions, compactions, API error codes; never message
   text, tool arguments or tool results) into this plugin's own plugin-data dir in the active profile,
   which the Omo bridge reads to light desks and fill the Hermes Board. Adds the omo_status and
-  omo_notify tools (toolset omo), a /omo slash command and `hermes omo setup|status|feed|world`.
+  omo_notify tools (toolset omo), a /omo slash command and `hermes omo create|setup|status|feed|world`.
   Network: only loopback HTTP GETs to the local Omo bridge (/health, /board.json); nothing leaves the
   machine. On Linux it reads /proc/net/tcp{,6} to skip a bridge port owned by another user.
   Writes only its own plugin-data dir (and, for `hermes omo world`, the output path you pass, or with
-  --install only <world>/datapacks/hermes_hq/ in an Omo Space save).
+  --install only <world>/datapacks/hermes_hq/ in an Omo Space save; `hermes omo create` writes one NEW
+  world folder in the Omo Space saves dir and never touches an existing one).
   `hermes omo world` reads every profile's profile.yaml, config.yaml (model, platform and plugin names
   only), cron/jobs.json (count) and skill/plugin dir names under your Hermes root.
   `hermes omo setup` also reads each profile's plugins.enabled/disabled and plugin dir names; it runs

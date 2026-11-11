@@ -19,14 +19,43 @@ kanban workers.
 |---|---|
 | ![Hermes HQ hall](docs/hermes-hq-hall.png) | ![Hermes Board](docs/hermes-board.png) |
 
-## What you get in 30 seconds
+## Quickstart
 
-- `hermes omo setup` checks Omo Space, finds **your** bridge port, lists which profiles have the plugin
-  on, prints the exact commands for the rest, and installs the Hermes HQ datapack into your world.
+```bash
+hermes plugins install omoresearch/hermes-omo-space --enable
+hermes omo
+```
+
+`hermes omo` asks one thing: **what kind of world do you want?** Type anything ("a cosy library in the
+snow", "neon night city") or just press Enter and Hermes gets creative. Your own model then designs the
+world from your profiles: a name, a look, and rooms named for what your agents actually do (an *Edit Bay*,
+a *Research Den*, a *Watch Tower*), every profile at a desk with a wall of screens.
+
+```
+  ◆ Snowbound Stacks   Snow outside, lamplight within: every agent at its desk.
+    Old Library · snowfield · night
+
+    Edit Bay         9  Six editors, their boss and the Chinese localizer · floor3-editing-editor…
+    Research Den    10  Scouting virals, ideas, briefs and scripts · floor3-idea-room, …
+    Watch Tower      2  Keeping the machines and services healthy · floor5-agent-ops, …
+
+    Enter build it   a another idea   q quit   or type what to change
+```
+
+Press Enter and it writes a new world. Open Omo Space → Singleplayer → your world, and the building rises
+around you as you arrive. Right-click any desk to talk to that agent. The Hermes Board on the wall shows
+what every session is doing.
+
+Unattended: `hermes omo create "a forest studio" --yes` (or `--json`). No model? `--no-ai` plans rooms
+from your profile names.
+
+## Also included
+
 - A **metadata-only activity feed** per profile (event kinds, tool names, timings; never message text,
-  tool arguments or results) that the Omo bridge reads. Nothing leaves your machine.
-- Agent tools `omo_status` / `omo_notify`, the `/omo` slash command ("where does this chat live in
-  the world?") and `hermes omo status` (a doctor with one next step).
+  tool arguments or results) that the Omo bridge reads for the Board. Nothing leaves your machine.
+- Agent tools `omo_status` / `omo_notify`, the `/omo` slash command and `hermes omo status` (a doctor).
+- `hermes omo setup` (checklist across profiles) and `hermes omo world` (Hermes HQ for a world you
+  already have).
 
 ## Install Omo Space (v1.3)
 
@@ -44,12 +73,7 @@ Two ways in (full steps in Omo Space's [README](https://github.com/omoresearch/o
 Open a world once so the bridge is running. In the creative menu the desk block is the **Omo Computer**
 (same id as the old Hermes Computer, `omolife:hermes_computer`), next to the **Omo Monitor**.
 
-## Quickstart (you already run Hermes)
-
-```bash
-hermes plugins install https://github.com/omoresearch/hermes-omo-space --enable   # placeholder URL until published
-hermes omo setup
-```
+## Adding Hermes HQ to a world you already have
 
 `hermes omo setup` walks a checklist and asks before it changes anything:
 
@@ -122,6 +146,9 @@ The plugin adds:
      a station toast.
 3. **`/omo`**: a one-paragraph answer to "where is this conversation in the world?"
 4. **`hermes omo`**:
+   - `hermes omo` / `hermes omo create [WISH...] [--name] [--profiles|--exclude] [--no-ai] [--yes|--json]`:
+     design a world with your model (via Hermes plugin LLM access: your active provider, host-owned auth)
+     and write it as a new world folder with the Hermes HQ datapack inside. It never touches an existing world.
    - `hermes omo setup [--enable-all] [--non-interactive] [--json]`: the guided checklist above.
    - `hermes omo status [--json]`: a doctor. Checks the bridge on the configured URL, the feed dir and
      marker, the age of the last event, and which profiles on this machine have a feed, then gives one next step.
@@ -140,6 +167,9 @@ The plugin adds:
   is refused. Hooks never touch the network. On Linux, before probing, the plugin reads
   `/proc/net/tcp` and `/proc/net/tcp6` to check that the process listening on the bridge port belongs
   to you; if another user's Omo bridge owns the port it is reported as "not yours" and never queried.
+- **The world designer** (`hermes omo` / `create`, only when you run it) sends your wish plus each profile's
+  name and its `profile.yaml` display name/description to **your own active model** through Hermes'
+  `ctx.llm` (no keys handled by the plugin). Never chats, memories, config values or secrets. `--no-ai` skips it.
 - **No telemetry, no accounts, no secrets.** Nothing is reported anywhere; there is nothing to opt into.
 - **Reads outside its own dir:** `hermes omo setup` reads each profile's `plugins.enabled` /
   `plugins.disabled` and plugin dir names (to show where omo-space is on), the Omo launcher's service

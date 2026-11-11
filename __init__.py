@@ -119,6 +119,17 @@ def _slash_text(feed: Feed, bridge_url: Any, session_id: Any) -> str:
     return " ".join((bridge, where, feed_txt))
 
 
+def _llm(ctx: Any) -> Any:
+    """``ctx.llm.complete_structured`` (Hermes plugin LLM access: the user's active model, host-owned
+    auth), resolved lazily so registering never touches a provider. None on a Hermes without it."""
+    def call(**kwargs: Any) -> Any:
+        llm = getattr(ctx, "llm", None)
+        if llm is None or not callable(getattr(llm, "complete_structured", None)):
+            raise RuntimeError("this Hermes has no plugin LLM access")
+        return llm.complete_structured(**kwargs)
+    return call
+
+
 # --------------------------------------------------------------------------- register
 
 def register(ctx: Any) -> None:
@@ -179,7 +190,7 @@ def register(ctx: Any) -> None:
         register_command("omo", handler=slash_omo,
                          description="Where this conversation lives in Omo Space, and whether the bridge is up")
 
-    runtime = cli.Runtime(feed=feed, bridge_url_setting=bridge_url(), profile=profile)
+    runtime = cli.Runtime(feed=feed, bridge_url_setting=bridge_url(), profile=profile, llm=_llm(ctx))
 
     def handle_cli(args: Any) -> int:
         feed.refresh_settings(force=True)
