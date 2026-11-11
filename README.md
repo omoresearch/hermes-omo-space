@@ -8,6 +8,9 @@ right-click, and talk to that agent. A Hermes Board on the wall shows what every
 No Minecraft experience needed: the plugin tells you what to get, opens the game for you, and shows the
 five keys you need.
 
+<p align="center"><img src="docs/hermes-omo.png" width="860" alt="A real hermes omo session: a treehouse wish becomes Mossbough Hollow, four rooms for six agents"></p>
+<p align="center"><sub>A real run, unedited: one wish, a plan your own model designed from six profiles, one Enter.</sub></p>
+
 ## Quickstart
 
 ```bash
@@ -72,6 +75,9 @@ Unattended: `hermes omo create "a forest studio" --yes` (or `--json`). No model?
 from your profile names.
 
 ## Also included
+
+<p align="center"><img src="docs/hermes-board.png" width="720" alt="The Hermes Board: every workspace and what its agent is doing"></p>
+<p align="center"><sub>The Hermes Board on the wall (demo workspaces): names and states only.</sub></p>
 
 > Live Board activity and in-game notices need the feed-aware Omo bridge from
 > [omo-space PR #40](https://github.com/omoresearch/omo-space/pull/40) (next Omo Space release); desks,

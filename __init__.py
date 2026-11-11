@@ -22,7 +22,7 @@ from typing import Any, Optional
 from . import cli, schemas, tools
 from .feed import Feed
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 PLUGIN_ID = "omo-space"
 logger = logging.getLogger(__name__)
 

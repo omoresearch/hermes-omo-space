@@ -42,7 +42,7 @@ def test_manifest_scalars():
     assert _scalar("name") == "omo-space"
     assert _scalar("label") == "Omo Space"
     assert _scalar("kind") == "standalone"
-    assert _scalar("version") == '"0.1.0"'
+    assert _scalar("version") == '"0.2.0"'
     assert re.fullmatch(r'">=0\.\d+\.\d+"', _scalar("requires_hermes"))
     assert _scalar("license") == "MIT"
     assert "requires_env" not in _manifest_text()
