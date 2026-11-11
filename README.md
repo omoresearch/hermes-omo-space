@@ -73,6 +73,10 @@ from your profile names.
 
 ## Also included
 
+> Live Board activity and in-game notices need the feed-aware Omo bridge from
+> [omo-space PR #40](https://github.com/omoresearch/omo-space/pull/40) (next Omo Space release); desks,
+> screens and the Board wall work with Omo Space v1.3 today.
+
 - A **metadata-only activity feed** per profile (event kinds, tool names, timings; never message text,
   tool arguments or results) that the Omo bridge reads for the Board. Nothing leaves your machine.
 - Agent tools `omo_status` / `omo_notify`, the `/omo` slash command and `hermes omo status` (a doctor).
