@@ -204,10 +204,35 @@ def desk_sign_lines(p):
             f"{p.get('skills', 0)} sk \u00b7 {p.get('cron_jobs', 0)} cron"]
 
 
-def template_from(size, kcells):
-    """A Template from hall.kit_cells / hall.board_cells (abstract nbt -> block entities)."""
+# Plain Minecraft (no Omo Space mod): the same building, with vanilla stand-ins for the Omo blocks.
+VANILLA = {
+    "omolife:monitor": "minecraft:black_concrete",
+    "omolife:hermes_computer": "minecraft:crafter",
+    "omolife:name_plate": "minecraft:heavy_weighted_pressure_plate",
+    "omolife:status_lamp": "minecraft:lantern[hanging=false,waterlogged=false]",
+}
+SCREEN_GLOW = "minecraft:sea_lantern"          # the middle of a vanilla screen wall glows
+
+
+def vanilla_spec(spec):
+    """Vanilla stand-in for an omolife block spec (None if spec is already vanilla)."""
+    name = spec.split("[", 1)[0]
+    return VANILLA.get(name)
+
+
+def template_from(size, kcells, vanilla=False):
+    """A Template from hall.kit_cells / hall.board_cells (abstract nbt -> block entities).
+    vanilla=True swaps the Omo blocks for plain Minecraft ones (no block entities)."""
     t = Template(*size)
     for (x, y, z), (spec, meta) in kcells.items():
+        if vanilla and spec.startswith("omolife:"):
+            if spec == "omolife:monitor":
+                i, j, w, h = meta["wall"]
+                mid = (i == w // 2 and j == h // 2) or (w > 6 and j == h // 2 and abs(i - w // 2) == 2)
+                t.put(x, y, z, SCREEN_GLOW if mid else VANILLA[spec])
+            else:
+                t.put(x, y, z, vanilla_spec(spec))
+            continue
         if spec == "omolife:monitor":
             i, j, w, h = meta["wall"]
             edges = "".join(c for c, on in (("l", i > 0), ("r", i < w - 1), ("u", j < h - 1), ("d", j > 0)) if on) or "none"
@@ -225,17 +250,17 @@ def template_from(size, kcells):
     return t
 
 
-def desk_template(profile, theme=4):
+def desk_template(profile, theme=4, vanilla=False):
     """7 x 5 x 2 desk kit (hall.kit_cells): themed frame with gold caps, a joined 5x3 terminal wall, the
     Omo Computer UNDER the screen in the frame row (touching only the bottom-middle panel), name plate and
     status lamp on the desk either side of the open cell in front of the computer, glowing sign on top."""
     color = L.THEMES[theme][1]
     kc = H.kit_cells(theme, sign=(color, desk_sign_lines(profile)), preset=preset_for(profile))
-    return template_from((L.KIT_W, L.KIT_H, L.KIT_D), kc)
+    return template_from((L.KIT_W, L.KIT_H, L.KIT_D), kc, vanilla=vanilla)
 
 
-def board_template(url):
-    return template_from((L.BOARD_W, L.BOARD_H, 1), H.board_cells(url))
+def board_template(url, vanilla=False):
+    return template_from((L.BOARD_W, L.BOARD_H, 1), H.board_cells(url), vanilla=vanilla)
 
 
 # --------------------------------------------------------------------------- commands
@@ -418,7 +443,7 @@ def clear_commands(hall):
 
 
 def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48, theme_order=None, arrival=None,
-                rooms=None):
+                rooms=None, vanilla=False):
     """{relative path: bytes} for the whole datapack.
 
     ``arrival`` (used by ``hermes omo create`` for a world it made itself): a dict with ``origin``
@@ -454,8 +479,8 @@ def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48, the
 
     # ---- templates
     for d, p in zip(lay["desks"], shown):
-        files[f"data/{ns}/structure/desk_{d['index']}.nbt"] = desk_template(p, d["theme"]).to_bytes()
-    files[f"data/{ns}/structure/board.nbt"] = board_template(url).to_bytes()
+        files[f"data/{ns}/structure/desk_{d['index']}.nbt"] = desk_template(p, d["theme"], vanilla).to_bytes()
+    files[f"data/{ns}/structure/board.nbt"] = board_template(url, vanilla).to_bytes()
 
     # every label sits inside the hall box or just outside the facade (z 0.3): kill box z0-1 .. z1
     kill_box = (f"execute positioned {_c(h['x0'])} {_c(h['y0'])} {_c(h['z0'] - 1)} run kill "
@@ -599,7 +624,7 @@ def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48, the
     fn("info", info)
 
     if arrival:
-        files.update(arrival_files(ns, arrival, lay, len(shown), exists))
+        files.update(arrival_files(ns, arrival, lay, len(shown), exists, vanilla=vanilla))
 
     files["pack.mcmeta"] = (json.dumps({"pack": {
         "pack_format": PACK_FORMAT, "min_format": PACK_FORMAT, "max_format": PACK_FORMAT,
@@ -608,7 +633,7 @@ def build_files(data, namespace="hermes_hq", bridge_port=8780, max_desks=48, the
     return dict(sorted(files.items()))
 
 
-def arrival_files(ns, arrival, lay, ndesks, exists):
+def arrival_files(ns, arrival, lay, ndesks, exists, vanilla=False):
     """First-join hook for a world `hermes omo create` made: build once, greet, face the arch."""
     ox, oy, oz = (int(v) for v in arrival["origin"])
     h = lay["hall"]
@@ -640,8 +665,10 @@ def arrival_files(ns, arrival, lay, ndesks, exists):
         f"execute unless entity {exists} positioned {ox} {oy} {oz} run function {ns}:build_at",
         "playsound minecraft:block.beacon.activate master @a ~ ~ ~ 0.6 1.2",
         "tellraw @a " + jtext([comp("Welcome home. ", "gold", 20, bold=True),
-                               comp("Walk through the arch. Each desk is one of your Hermes profiles: "
-                                    "right-click its Omo Computer once to open it.", "white", 200)]),
+                               comp("Walk through the arch. Each desk is one of your Hermes profiles"
+                                    + (", named on its sign. Open the world in Omo Space to make the screens "
+                                       "live terminals you can talk to." if vanilla else
+                                       ": right-click its Omo Computer once to open it."), "white", 220)]),
     ])
     return files
 

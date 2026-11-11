@@ -9,6 +9,7 @@ description: >
   world for your agents, every profile at a desk with screens in rooms named for what they do; it is
   written as a new Omo Space world that builds itself when you open it. The designer sends only your wish
   and profile names/descriptions to your own active model via ctx.llm.
+  The omo_create_world tool does the same from any chat (Desktop, Telegram...).
   Also: see your whole Hermes system (profiles, CLI/TUI/gateway sessions, subagents, cron, kanban) as a
   place inside Omo Space, the Omo Research Minecraft world. Hooks write a metadata-only activity feed
   (session/turn/tool starts and ends, kanban transitions, compactions, API error codes; never message
@@ -33,6 +34,7 @@ tags: [omo, minecraft, observability, dashboard]
 provides_tools:
   - omo_status
   - omo_notify
+  - omo_create_world
 provides_hooks:
   - on_session_start
   - on_session_end

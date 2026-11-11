@@ -63,7 +63,10 @@ def add_parser(subs: Any) -> argparse.ArgumentParser:
     p.add_argument("--profiles", help="only these profiles (comma separated; default: all)")
     p.add_argument("--exclude", help="leave these profiles out (comma separated)")
     p.add_argument("--no-ai", action="store_true", help="plan rooms from profile names, without the model")
-    p.add_argument("--saves-dir", help="Minecraft saves dir (default: Omo Space's)")
+    p.add_argument("--for", dest="target", choices=["auto", "omo", "minecraft"], default="auto",
+                   help="omo = Omo Space (live screens and agents), minecraft = plain Minecraft 26.2 "
+                        "(the building only); auto picks Omo Space when it is installed")
+    p.add_argument("--saves-dir", help="Minecraft saves dir (default: Omo Space's, or the Minecraft launcher's)")
     p.add_argument("--bridge-port", type=int, default=None, help="Omo bridge port for the Board wall")
     p.add_argument("--hermes-root", default=None, help="Hermes root (default $HERMES_ROOT or ~/.hermes)")
     p.add_argument("-y", "--yes", action="store_true", help="build the first plan without asking")
@@ -186,7 +189,7 @@ def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[.
         if not quiet:
             print(line, file=out)
 
-    saves = Path(args.saves_dir).expanduser() if args.saves_dir else onboarding.saves_dir()
+    saves, vanilla = onboarding.pick_target(args.saves_dir, getattr(args, "target", "auto") or "auto")
     root = Path(args.hermes_root).expanduser() if args.hermes_root else inv.hermes_root()
     data = inv.collect(root, only=args.profiles, exclude=args.exclude)
     profiles = data["profiles"][:MAX_DESKS]
@@ -204,7 +207,12 @@ def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[.
         say(f"  {p('◆', p.GOLD)} {p('Omo Space', p.BOLD)}   {p('a world for your Hermes agents', p.DIM)}")
         say(f"    Your {len(profiles)} profile{'s' if len(profiles) != 1 else ''} each get a desk with screens, "
             "in rooms Hermes designs.")
-        if not args.saves_dir and not saves.is_dir():
+        if vanilla:
+            say(p("    Building for plain Minecraft: the full building, screens as dark glass. Open it in Omo Space",
+                  p.DIM))
+            say(p("    (https://github.com/omoresearch/omo-space) to make every screen a live agent you can talk to.",
+                  p.DIM))
+        elif not args.saves_dir and not saves.is_dir():
             say(p(f"    Omo Space isn't installed yet; the world will wait in {saves}.", p.DIM))
 
         wish = " ".join(args.wish or []).strip()
@@ -262,8 +270,9 @@ def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[.
     t0 = time.time()
     try:
         files = dp.build_files(dict(data, profiles=ordered), namespace=NS, bridge_port=port, max_desks=MAX_DESKS,
-                               rooms=rooms, arrival={"origin": list(ORIGIN), "title": name, "time": tod,
-                                                     "tagline": plan.get("tagline", "")})
+                               rooms=rooms, vanilla=vanilla,
+                               arrival={"origin": list(ORIGIN), "title": name, "time": tod,
+                                        "tagline": plan.get("tagline", "")})
         world = newworld.create_world(saves, name, ground=plan["ground"], time=tod, spawn=SPAWN)
     except (ValueError, newworld.WorldError, OSError) as exc:
         print(f"error: {exc}", file=err)
@@ -280,11 +289,48 @@ def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[.
     say(f"    {p('✓', p.GREEN)} New world \"{name}\" ({time.time() - t0:.1f}s)")
 
     result = {"world": world.name, "path": str(world), "plan": dict(plan, name=name), "designed_by": source,
+              "game": "minecraft" if vanilla else "omo",
               "desks": len(ordered), "board_url": f"http://127.0.0.1:{port}/board"}
     if quiet:
         print(json.dumps(result, indent=1), file=out)
         return 0
     say("")
-    say(f"  {p('◆', p.GOLD)} {p('Ready.', p.BOLD)} Open Omo Space → Singleplayer → {p(name, p.GOLD)}")
-    say("    The building rises around you as you arrive. Right-click a desk to talk to that agent.")
+    game = "Minecraft 26.2" if vanilla else "Omo Space"
+    say(f"  {p('◆', p.GOLD)} {p('Ready.', p.BOLD)} Open {game} → Singleplayer → {p(name, p.GOLD)}")
+    say("    The building rises around you as you arrive."
+        + (" Each desk carries its agent's name." if vanilla else " Right-click a desk to talk to that agent."))
     return 0
+
+
+def tool_create(args: Any, *, llm: Optional[Callable[..., Any]] = None, board_port: Optional[int] = None) -> str:
+    """The ``omo_create_world`` tool: the same designer and builder, unattended, JSON back."""
+    import io
+    try:
+        a = args if isinstance(args, dict) else {}
+        wish = str(a.get("wish") or "")[:300]
+        argv = ["create", "--json", "--for", a.get("game") if a.get("game") in ("auto", "omo", "minecraft") else "auto"]
+        if a.get("name"):
+            argv += ["--name", str(a["name"])[:48]]
+        argv += ["--", *wish.split()]
+        parser = argparse.ArgumentParser(prog="hermes omo")
+        add_parser(parser.add_subparsers(dest="omo_command"))
+        ns = parser.parse_args(argv)
+        out, err = io.StringIO(), io.StringIO()
+        rc = run(ns, board_port=board_port, llm=llm, out=out, err=err, interactive=False)
+        if rc != 0:
+            return json.dumps({"created": False, "error": (err.getvalue().strip() or f"exit {rc}")[-300:]})
+        res = json.loads(out.getvalue())
+        plan = res["plan"]
+        game = "Minecraft 26.2" if res.get("game") == "minecraft" else "Omo Space"
+        return json.dumps({
+            "created": True, "world": res["world"], "path": res["path"], "game": game,
+            "tagline": plan.get("tagline", ""), "look": [plan["style"], plan["ground"], plan["time"]],
+            "rooms": [{"name": r["name"], "about": r.get("about", ""), "desks": len(r["profiles"])}
+                      for r in plan["rooms"]],
+            "designed_by": res["designed_by"],
+            "next": f"Open {game} -> Singleplayer -> {res['world']}; the building rises around the player on arrival.",
+        })
+    except SystemExit:
+        return json.dumps({"created": False, "error": "bad arguments"})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"created": False, "error": f"omo_create_world failed: {type(exc).__name__}"})

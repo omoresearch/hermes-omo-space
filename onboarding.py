@@ -65,6 +65,41 @@ def saves_dir(env: Optional[Mapping[str, str]] = None, platform: Optional[str] =
     return omo_data_dir(env, platform, home) / "runtime" / "game" / "saves"
 
 
+def minecraft_saves_dir(env: Optional[Mapping[str, str]] = None, platform: Optional[str] = None,
+                       home: Optional[Path] = None) -> Path:
+    """The official Minecraft launcher's saves dir: ~/.minecraft (Linux), ~/Library/Application
+    Support/minecraft (macOS), %APPDATA%\\.minecraft (Windows)."""
+    env = os.environ if env is None else env
+    platform = sys.platform if platform is None else platform
+    home = Path.home() if home is None else Path(home)
+    if platform == "darwin":
+        return home / "Library" / "Application Support" / "minecraft" / "saves"
+    if platform.startswith("win"):
+        return Path(env.get("APPDATA") or home / "AppData" / "Roaming") / ".minecraft" / "saves"
+    return home / ".minecraft" / "saves"
+
+
+def pick_target(saves_arg: Optional[str], target: str = "auto", env: Optional[Mapping[str, str]] = None,
+                platform: Optional[str] = None, home: Optional[Path] = None) -> tuple[Path, bool]:
+    """(saves dir, vanilla?) for a new world. auto: Omo Space if installed, else plain Minecraft if its
+    launcher dir exists, else Omo Space's (the world waits there until Omo Space is installed)."""
+    omo = saves_dir(env, platform, home)
+    mc = minecraft_saves_dir(env, platform, home)
+    if target == "omo":
+        chosen, vanilla = omo, False
+    elif target == "minecraft":
+        chosen, vanilla = mc, True
+    elif omo_data_dir(env, platform, home).is_dir():
+        chosen, vanilla = omo, False
+    elif mc.parent.is_dir():
+        chosen, vanilla = mc, True
+    else:
+        chosen, vanilla = omo, False
+    if saves_arg:
+        chosen = Path(saves_arg).expanduser()
+    return chosen, vanilla
+
+
 def list_worlds(saves: Path, namespace: str = DEFAULT_NAMESPACE) -> list[dict]:
     """Minecraft worlds (dirs with ``level.dat``) directly under ``saves``, sorted by name."""
     worlds = []

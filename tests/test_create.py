@@ -231,3 +231,32 @@ def test_folder_name_is_safe(plugin):
     assert nw.folder_name("../../etc") == "etc"
     assert nw.folder_name("a/b\\c:d") == "abcd"
     assert nw.folder_name("   ") == "Hermes HQ"
+
+
+def test_tool_creates_world(plugin, hermes_home, saves, monkeypatch):
+    monkeypatch.setattr(plugin.onboarding, "pick_target", lambda s, t="auto", **k: (saves, t == "minecraft"))
+    res = json.loads(plugin.create.tool_create({"wish": "snowy library", "game": "minecraft"}, llm=fake_llm(GOOD_PLAN)))
+    assert res["created"] and res["world"] == "Snow Library" and res["game"] == "Minecraft 26.2"
+    assert [r["name"] for r in res["rooms"]][:2] == ["Stacks", "Reading Nook"]
+    blob = b"".join(x.read_bytes() for x in (saves / "Snow Library" / "datapacks").rglob("*") if x.is_file())
+    assert b"omolife" not in blob                                # plain Minecraft: vanilla blocks only
+
+
+def test_tool_bad_args_never_raise(plugin, hermes_home, saves, monkeypatch):
+    monkeypatch.setattr(plugin.onboarding, "pick_target", lambda s, t="auto", **k: (saves, False))
+    for bad in (None, "x", {"game": "lava", "wish": 5}, {"name": "../../x"}):
+        res = json.loads(plugin.create.tool_create(bad, llm=None))
+        assert "created" in res
+
+
+def test_pick_target(plugin, tmp_path):
+    ob = plugin.onboarding
+    home = tmp_path / "h"
+    assert ob.pick_target(None, home=home, platform="linux", env={})[1] is False       # nothing: wait for Omo
+    (home / ".minecraft").mkdir(parents=True)
+    path, van = ob.pick_target(None, home=home, platform="linux", env={})
+    assert van and path == home / ".minecraft" / "saves"
+    (home / ".local/share/omo").mkdir(parents=True)
+    path, van = ob.pick_target(None, home=home, platform="linux", env={})
+    assert not van and path == home / ".local/share/omo/runtime/game/saves"
+    assert ob.pick_target(None, "minecraft", home=home, platform="linux", env={})[1] is True

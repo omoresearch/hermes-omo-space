@@ -176,6 +176,14 @@ def register(ctx: Any) -> None:
     ctx.register_tool(name="omo_notify", toolset="omo", schema=schemas.OMO_NOTIFY, handler=omo_notify,
                       check_fn=notify_available, description="Show a short notice inside Omo Space", emoji="🔔")
 
+    def omo_create_world(args: Any = None, **kwargs: Any) -> str:
+        from . import create
+        return create.tool_create(args, llm=_llm(ctx))
+
+    ctx.register_tool(name="omo_create_world", toolset="omo", schema=schemas.OMO_CREATE_WORLD,
+                      handler=omo_create_world, description="Design and build a Minecraft world for your agents",
+                      emoji="🏰")
+
     def slash_omo(raw_args: str = "", **kwargs: Any) -> str:
         try:
             feed.refresh_settings(force=True)

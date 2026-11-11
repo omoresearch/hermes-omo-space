@@ -67,7 +67,7 @@ def test_register_matches_manifest(plugin, fake_ctx_cls, tmp_path):
     plugin.register(ctx)
     tools = sorted(t["name"] for t in ctx.tools)
     hooks = sorted({n for n, _ in ctx.hooks})
-    assert tools == sorted(_manifest_list("provides_tools")) == ["omo_notify", "omo_status"]
+    assert tools == sorted(_manifest_list("provides_tools")) == ["omo_create_world", "omo_notify", "omo_status"]
     assert hooks == sorted(_manifest_list("provides_hooks"))
     assert len(ctx.hooks) == len(hooks)  # each hook registered once
     assert {t["toolset"] for t in ctx.tools} == {"omo"}
@@ -88,7 +88,7 @@ def test_register_on_minimal_ctx(plugin, fake_ctx_cls, hermes_home):
     plugin.register(ctx)
     marker = hermes_home / "plugin-data" / "omo-space" / "feed" / "omo-feed.json"
     assert json.loads(marker.read_text())["profile"] == "default"
-    assert sorted(t["name"] for t in ctx.tools) == ["omo_notify", "omo_status"]
+    assert sorted(t["name"] for t in ctx.tools) == ["omo_create_world", "omo_notify", "omo_status"]
 
 
 def test_profile_derived_from_hermes_home(plugin, fake_ctx_cls, tmp_path, monkeypatch):
@@ -131,7 +131,7 @@ def test_register_survives_unwritable_data_dir(plugin, fake_ctx_cls, tmp_path):
     blocker.write_text("x")
     ctx = fake_ctx_cls(data_dir=blocker / "pd")
     plugin.register(ctx)  # must not raise
-    assert len(ctx.tools) == 2
+    assert len(ctx.tools) == 3
 
 
 def test_bad_bridge_url_setting_does_not_break_register(plugin, fake_ctx_cls, tmp_path):

@@ -40,3 +40,26 @@ OMO_NOTIFY = {
         "required": ["text"],
     },
 }
+
+OMO_CREATE_WORLD = {
+    "name": "omo_create_world",
+    "description": (
+        "Design and build a new Minecraft world for the user's Hermes agents: every Hermes profile gets a desk "
+        "with a wall of screens, grouped into rooms named for what the agents do, with a name, look and "
+        "time of day that fit the wish. Writes ONE new world folder (Omo Space's saves if installed, else the "
+        "Minecraft launcher's) and never touches existing worlds. Use it when the user asks for a world, an "
+        "office, an HQ or a building for their agents. Takes about 30 seconds (the design uses the model). "
+        "Returns the world name, where it was saved and the rooms."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "wish": {"type": "string", "maxLength": 300,
+                     "description": "What kind of world, in the user's words; empty = be creative."},
+            "name": {"type": "string", "maxLength": 48, "description": "World name, only if the user gave one."},
+            "game": {"type": "string", "enum": ["auto", "omo", "minecraft"],
+                     "description": "omo = Omo Space (live screens), minecraft = plain Minecraft 26.2. Default auto."},
+        },
+        "required": [],
+    },
+}
