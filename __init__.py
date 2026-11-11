@@ -199,6 +199,6 @@ def register(ctx: Any) -> None:
 
     register_cli_command = getattr(ctx, "register_cli_command", None)
     if callable(register_cli_command):
-        register_cli_command(name="omo", help="Omo Space: setup, doctor, activity feed, Hermes HQ world",
+        register_cli_command(name="omo", help="Design a Minecraft world for your agents (Omo Space)",
                              setup_fn=cli.setup_parser, handler_fn=handle_cli,
-                             description="See this Hermes setup as a place inside Omo Space.")
+                             description="Design a Minecraft world for your Hermes agents and watch them work in it.")

@@ -275,7 +275,8 @@ def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[.
     except (dp.OutputError, OSError) as exc:
         print(f"error: could not finish the world at {world}: {exc}", file=err)
         return 1
-    say(f"    {p('✓', p.GREEN)} {len(rooms)} rooms, {len(ordered)} desks with screens, the Hermes Board")
+    say(f"    {p('✓', p.GREEN)} {len(rooms)} room{'s' if len(rooms) != 1 else ''}, {len(ordered)} "
+        f"desk{'s' if len(ordered) != 1 else ''} with screens, the Hermes Board")
     say(f"    {p('✓', p.GREEN)} New world \"{name}\" ({time.time() - t0:.1f}s)")
 
     result = {"world": world.name, "path": str(world), "plan": dict(plan, name=name), "designed_by": source,
