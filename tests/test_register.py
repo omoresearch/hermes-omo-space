@@ -233,3 +233,28 @@ def test_feed_setting_is_live(plugin, fake_ctx_cls, tmp_path, monkeypatch):
     start(session_id="s2", platform="cli")
     assert (feed_dir / "events.jsonl").read_text() == before
     assert json.loads(notify["handler"]({"text": "hi"}))["queued"] is False
+
+
+def test_hooks_older_hermes_lacks_are_skipped(plugin, fake_ctx_cls, tmp_path, monkeypatch):
+    """A Hermes before v0.22.3 has no post_compaction: the plugin skips it instead of storing an
+    unknown hook, and registers every other hook as usual."""
+    declared = set(_manifest_list("provides_hooks"))
+    monkeypatch.setattr(plugin, "_known_hooks", lambda: frozenset(declared - {"post_compaction"}))
+    ctx = fake_ctx_cls(data_dir=tmp_path / "pd", profile="work")
+    plugin.register(ctx)
+    hooks = {n for n, _ in ctx.hooks}
+    assert "post_compaction" not in hooks
+    assert hooks == declared - {"post_compaction"}
+    assert sorted(t["name"] for t in ctx.tools) == ["omo_create_world", "omo_notify", "omo_status"]
+
+
+def test_all_hooks_registered_when_hermes_knows_them(plugin, fake_ctx_cls, tmp_path, monkeypatch):
+    declared = set(_manifest_list("provides_hooks"))
+    monkeypatch.setattr(plugin, "_known_hooks", lambda: frozenset(declared | {"some_future_hook"}))
+    ctx = fake_ctx_cls(data_dir=tmp_path / "pd", profile="work")
+    plugin.register(ctx)
+    assert {n for n, _ in ctx.hooks} == declared
+
+
+def test_manifest_floor_matches_oldest_tested_hermes():
+    assert _scalar("requires_hermes").strip('"') == ">=0.21.6"

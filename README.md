@@ -288,10 +288,9 @@ treats it as stale (15 min, or when the pid is dead).
 
 ## Compatibility
 
-- **Hermes:** `requires_hermes: ">=0.22.3"`, the first release with every hook the plugin uses
-  (`post_compaction` arrived in v0.22.3; `kanban_task_*` in 0.18.0; `ctx.state` / `ctx.get_config` in
-  0.20.1). Optional context APIs are still probed, so an older Hermes that ignores `requires_hermes`
-  (it is enforced from 0.21.2) degrades instead of crashing.
+- **Hermes:** v0.21.6 or newer (`requires_hermes: ">=0.21.6"`), tested on v0.21.6, v0.22.0, v0.22.2,
+  v0.22.3 and v0.23.1. On a Hermes older than v0.22.3 the `post_compaction` hook does not exist, so it
+  is skipped at load and the Board just shows no compaction events; everything else is the same.
 - **Omo Space:** v1.3 for desks (the Omo Computer), lamps and the Board wall; the bridge from omo-space
   PR #40 (next release) for Board activity, Elsewhere and HUD notices. `tests/test_contract_pr40.py` reads
   this plugin's feed with that bridge's own reader.

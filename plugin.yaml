@@ -27,9 +27,9 @@ description: >
   `hermes -p <profile> plugins enable omo-space` or `config set ...bridge_url` only after a y/N prompt
   at a terminal, and without a TTY it only prints the commands.
   Reads no secrets, starts no background processes, never approves or blocks tools.
-# post_compaction (the newest hook used here) landed in v0.22.3; every other hook, get_config and
-# ctx.state are older (kanban_* 0.18.0, ctx.state/get_config 0.20.1, requires_hermes enforced 0.21.2).
-requires_hermes: ">=0.22.3"
+# v0.21.6 is the oldest release tested. post_compaction (v0.22.3) is registered only where the
+# running Hermes fires it; every other hook, get_config, ctx.state and ctx.llm are in v0.21.6.
+requires_hermes: ">=0.21.6"
 tags: [omo, minecraft, observability, dashboard]
 provides_tools:
   - omo_status

@@ -5,8 +5,8 @@ Registers (see plugin.yaml, which must list exactly these):
 - tools ``omo_status`` (read-only bridge check) and ``omo_notify`` (queue an in-game notice), toolset ``omo``;
 - the ``/omo`` slash command and the ``hermes omo setup|status|feed|world`` CLI.
 
-Requires Hermes v0.22.3+ (the first release with every hook used here; ``post_compaction`` landed in
-v0.22.3). Optional context surfaces (``ctx.state``, ``ctx.get_config``, ``ctx.profile_name``,
+Runs on Hermes v0.21.6+. Hooks the running Hermes does not fire are skipped at registration
+(``post_compaction`` landed in v0.22.3; older Hermes just has no compaction events). Optional context surfaces (``ctx.state``, ``ctx.get_config``, ``ctx.profile_name``,
 ``register_command``, ``register_cli_command``) are still probed with fallbacks, and Hermes stores an
 unknown hook name with a warning, so an older Hermes that ignores ``requires_hermes`` degrades
 instead of crashing.
@@ -130,6 +130,18 @@ def _llm(ctx: Any) -> Any:
     return call
 
 
+def _known_hooks() -> Optional[frozenset]:
+    """Hook names this Hermes fires, or None when it does not say. A hook newer than the running
+    Hermes (``post_compaction`` arrived in v0.22.3) is skipped instead of stored with a warning, so
+    the plugin loads cleanly on every supported Hermes and simply has one event fewer there."""
+    try:
+        from hermes_cli.plugins import VALID_HOOKS  # type: ignore
+
+        return frozenset(VALID_HOOKS)
+    except Exception:  # noqa: BLE001 - no Hermes core (tests, a doctor sandbox): register everything
+        return None
+
+
 # --------------------------------------------------------------------------- register
 
 def register(ctx: Any) -> None:
@@ -156,8 +168,10 @@ def register(ctx: Any) -> None:
         logger.warning("omo-space: feed dir %s is not writable (%s); hooks will stay silent",
                        feed.root, feed.last_error)
 
+    known = _known_hooks()
     for name, callback in feed.hooks().items():
-        ctx.register_hook(name, callback)
+        if known is None or name in known:
+            ctx.register_hook(name, callback)
 
     def omo_status(args: Any = None, **kwargs: Any) -> str:
         feed.refresh_settings(force=True)
