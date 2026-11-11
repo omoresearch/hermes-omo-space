@@ -1,6 +1,6 @@
 [project]
 name = "hermes-omo-space"
-version = "0.2.0"
+version = "0.3.0"
 description = "omo-space: see your Hermes Agent system as a place inside Omo Space (activity feed, omo tools, /omo, hermes omo)"
 readme = "README.md"
 license = { text = "MIT" }

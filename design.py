@@ -1,15 +1,16 @@
 """The world designer: turn a one-line wish ("a cosy library in the snow", or nothing = be creative)
-plus this Hermes install (profile names and their one-line descriptions) into a world plan.
+plus this Hermes install (the setup audit: names, descriptions, how each profile is used) into a world plan.
 
 The plan is plain data, always validated here before anything is built:
 
     {"name": str, "tagline": str, "style": STYLE key, "ground": GROUND key, "time": TIME key,
-     "rooms": [{"name": str, "theme": THEME name, "about": str, "profiles": [profile names]}]}
+     "rooms": [{"name": str, "theme": THEME name, "about": str, "why": str, "profiles": [profile names]}]}
 
 Every profile lands in exactly one room; whatever the model leaves out goes to a "Commons" room, and a
-plan the model could not produce falls back to `fallback_plan` (rooms from name prefixes). The model
-sees only profile names, display labels and descriptions (from profile.yaml) and the user's wish:
-never chats, memories, config values or secrets.
+plan the model could not produce falls back to `fallback_plan` (rooms from shared skills, then name
+prefixes, with quiet profiles in their own corner). The model sees the user's wish and `audit.model_text`:
+profile names, descriptions, chat platform names, job/session counts, skill names and days since last
+use. Never chats, memories, config values or secrets.
 """
 
 from __future__ import annotations
@@ -24,8 +25,10 @@ STYLES = {
     "library": ("Old Library", "dark oak, bookshelves, warm copper", ["library", "copper", "birch", "tuff"]),
     "studio": ("Clean Studio", "quartz, birch and glass, bright and calm", ["quartz", "birch", "prismarine", "purpur"]),
     "forge": ("Copper Forge", "deepslate, copper and tuff, moody", ["copper", "tuff", "library", "prismarine"]),
+    "grove": ("Forest Grove", "mossy wood, bamboo and warm lanterns", ["tuff", "birch", "library", "cherry"]),
 }
-GROUNDS = {"grass": "Meadow", "snow": "Snowfield", "sand": "Desert", "stone": "Stone plaza"}
+GROUNDS = {"grass": "Meadow", "forest": "Forest floor", "snow": "Snowfield", "sand": "Desert",
+           "stone": "Stone plaza"}
 TIMES = {"morning": ("Morning", 1000), "noon": ("Noon", 6000), "sunset": ("Golden hour", 12000),
          "night": ("Night", 18000)}
 THEMES = {"birch": 1, "cherry": 2, "library": 3, "prismarine": 4, "copper": 5, "tuff": 6, "quartz": 7, "purpur": 8}
@@ -33,6 +36,7 @@ THEME_BLURB = {"birch": "pale wood, warm yellow light", "cherry": "pink cherry w
                "prismarine": "sea-green stone, sea lanterns", "copper": "deepslate and copper",
                "tuff": "grey-green tuff, bamboo", "quartz": "white quartz, blue glass", "purpur": "calcite, amethyst"}
 MAX_ROOMS = 12
+DESIGN_TIMEOUT = 120.0       # host default is 30 s; a 96-profile design timed out at 30 s (49 profiles took ~19 s)
 ROOM_NAME_MAX = 15            # fits one line of a Minecraft sign
 
 SCHEMA = {
@@ -49,6 +53,8 @@ SCHEMA = {
                 "name": {"type": "string", "description": f"room name, at most {ROOM_NAME_MAX} characters"},
                 "theme": {"type": "string", "enum": list(THEMES)},
                 "about": {"type": "string", "description": "what happens in this room, under 60 characters"},
+                "why": {"type": "string", "description": "why these agents share a room, from the setup facts "
+                                                       "(skills, platforms, schedules, quiet), under 70 characters"},
                 "profiles": {"type": "array", "items": {"type": "string"}},
             },
             "required": ["name", "theme", "profiles"],
@@ -60,8 +66,17 @@ SCHEMA = {
 INSTRUCTIONS = f"""You design a Minecraft building that holds someone's AI agents. Each agent is a Hermes
 profile and becomes a desk (a computer with a wall of screens) in a room of the building.
 
-Group the profiles into rooms by what they do, the way a real studio has departments: use their names
-and descriptions. 2-{MAX_ROOMS} rooms, each with 1-10 profiles; every profile in exactly one room, spelled
+You get the user's wish and an audit of their setup: for each profile its description, the chat
+platforms it talks on, how many scheduled jobs it runs, the skills that set it apart, how it is used and
+how long it has been quiet. Design for THIS setup, not a generic office:
+- Group by what the agents really do: shared skills and descriptions first, names last.
+- A setup with one profile is a single cosy room; a fleet is departments.
+- Profiles marked quiet or never used go together in one calm room (an archive, a library loft, a
+  sleeping porch) so the busy rooms stay busy; skip this when nobody is quiet.
+- Give every room a short "why" a person can check against the facts, e.g. "all 6 share the ads skills"
+  or "these 4 talk to customers on Discord".
+- Match the look to the wish: a forest, treehouse or woods wish wants style grove on ground forest.
+2-{MAX_ROOMS} rooms, each with 1-10 profiles; every profile in exactly one room, spelled
 exactly as given. Give rooms short, warm, specific names (at most {ROOM_NAME_MAX} characters, like
 "Edit Bay", "Research Den", "Launch Pad"), never a raw prefix like "omo-*".
 
@@ -87,32 +102,72 @@ FRIENDLY = {"omo": "Omo Studio", "yt": "YouTube Room", "lf": "Long-form", "vod":
             "floor5": "Ops Deck"}
 
 
-def fallback_plan(profiles: list[dict], wish: str = "", seed: Optional[int] = None) -> dict:
-    """A plan without a model: rooms from name prefixes, look from keywords in the wish."""
-    rnd = random.Random(seed)
-    w = (wish or "").lower()
-    style = next((k for k, kw in (("library", "librar"), ("blossom", "cherr"), ("blossom", "pink"),
+def _look_from_wish(w: str, rnd: random.Random) -> tuple[str, str, str]:
+    style = next((k for k, kw in (("grove", "forest"), ("grove", "tree"), ("grove", "wood"), ("grove", "jungle"),
+                                  ("library", "librar"), ("blossom", "cherr"), ("blossom", "pink"),
                                   ("studio", "clean"), ("studio", "minimal"), ("forge", "copper"),
                                   ("forge", "industrial"), ("falls", "cave")) if kw in w), None)
-    ground = next((k for k, kw in (("snow", "snow"), ("snow", "winter"), ("sand", "desert"), ("sand", "beach"),
+    ground = next((k for k, kw in (("forest", "forest"), ("forest", "tree"), ("forest", "wood"),
+                                   ("snow", "snow"), ("snow", "winter"), ("sand", "desert"), ("sand", "beach"),
                                    ("stone", "city"), ("stone", "plaza")) if kw in w), None)
     tod = next((k for k, kw in (("night", "night"), ("sunset", "sunset"), ("sunset", "golden"),
                                 ("morning", "morning")) if kw in w), None)
-    style = style or rnd.choice(list(STYLES))
+    return style or rnd.choice(list(STYLES)), ground or "grass", tod or "sunset"
+
+
+def fallback_plan(profiles: list[dict], wish: str = "", seed: Optional[int] = None,
+                  audit: Optional[dict] = None) -> dict:
+    """A plan without a model. With an audit: quiet profiles get their own room, the rest group by a
+    shared distinctive skill, then by name prefix. The look comes from keywords in the wish."""
+    rnd = random.Random(seed)
+    style, ground, tod = _look_from_wish((wish or "").lower(), rnd)
+    facts = {r["name"]: r for r in (audit or {}).get("profiles", [])}
+    quiet = set((audit or {}).get("quiet") or [])
+    if len(profiles) - len(quiet) < 1:
+        quiet = set()
+    rooms: list[dict] = []
+    active = [p for p in profiles if p["name"] not in quiet]
+    placed: set[str] = set()
+    if facts and len(active) > 6:
+        counts: dict[str, list[str]] = {}
+        for p in active:
+            for sk in facts.get(p["name"], {}).get("skills", [])[:3]:
+                counts.setdefault(sk, []).append(p["name"])
+        for sk, names in sorted(counts.items(), key=lambda kv: -len(kv[1])):
+            names = [n for n in names if n not in placed]
+            if len(names) >= 3 and len(rooms) < MAX_ROOMS - 2:
+                rooms.append({"name": _skill_room(sk), "profiles": names,
+                              "why": f"{len(names)} share the {sk} skill"[:70]})
+                placed |= set(names)
     groups: dict[str, list[str]] = {}
-    for p in profiles:
-        groups.setdefault(_prefix(p["name"]), []).append(p["name"])
+    for p in active:
+        if p["name"] not in placed:
+            groups.setdefault(_prefix(p["name"]), []).append(p["name"])
     big = {k: v for k, v in groups.items() if k and len(v) >= 3}
     rest = [n for k, v in groups.items() if k not in big for n in v]
-    rooms = [{"name": FRIENDLY.get(k, k.capitalize() + " Room"), "profiles": v} for k, v in big.items()]
+    for k, v in big.items():
+        rooms.append({"name": FRIENDLY.get(k, k.capitalize() + " Room"), "profiles": v,
+                      "why": f"all {len(v)} are {k}-* profiles"})
     if rest:
-        rooms.append({"name": "Commons" if rooms else "The Studio", "profiles": rest})
+        rooms.append({"name": "Commons" if rooms else "The Studio", "profiles": rest, "why": ""})
+    if quiet:
+        rooms.append({"name": "Quiet Loft", "profiles": [p["name"] for p in profiles if p["name"] in quiet],
+                      "why": f"no sessions in {QUIET_DAYS}+ days"})
     pal = STYLES[style][2] + [t for t in THEMES if t not in STYLES[style][2]]
     for i, r in enumerate(rooms):
         r["theme"] = pal[i % len(pal)]
         r["about"] = ""
     return {"name": "Hermes HQ", "tagline": "Your agents, at home.", "style": style,
-            "ground": ground or "grass", "time": tod or "sunset", "rooms": rooms}
+            "ground": ground, "time": tod, "rooms": rooms}
+
+
+QUIET_DAYS = 30
+
+
+def _skill_room(skill: str) -> str:
+    words = [w for w in re.split(r"[-_ ]+", skill) if w][:2]
+    name = " ".join(w.capitalize() for w in words) or "Team"
+    return (name + " Room")[:ROOM_NAME_MAX] if len(name) <= ROOM_NAME_MAX - 5 else name[:ROOM_NAME_MAX]
 
 
 def validate(plan: Any, profiles: list[dict]) -> dict:
@@ -136,10 +191,10 @@ def validate(plan: Any, profiles: list[dict]) -> dict:
             continue
         theme = r.get("theme") if r.get("theme") in THEMES else None
         rooms.append({"name": _clean(r.get("name"), ROOM_NAME_MAX) or "Room", "theme": theme,
-                      "about": _clean(r.get("about"), 60), "profiles": members})
+                      "about": _clean(r.get("about"), 60), "why": _clean(r.get("why"), 70), "profiles": members})
     rest = [n for n in names if n not in seen]
     if rest:
-        rooms.append({"name": "Commons", "theme": None, "about": "everyone else", "profiles": rest})
+        rooms.append({"name": "Commons", "theme": None, "about": "everyone else", "why": "", "profiles": rest})
     while len(rooms) > MAX_ROOMS:                      # merge the two smallest
         rooms.sort(key=lambda r: len(r["profiles"]))
         a, b = rooms.pop(0), rooms.pop(0)
@@ -172,17 +227,23 @@ def _profile_lines(profiles: list[dict]) -> str:
 
 
 def design(profiles: list[dict], wish: str, llm: Optional[Callable[..., Any]], *,
-           previous: Optional[dict] = None, change: str = "") -> tuple[dict, str]:
+           previous: Optional[dict] = None, change: str = "", audit: Optional[dict] = None) -> tuple[dict, str]:
     """(plan, source) where source is 'model' or 'fallback'. Never raises for model trouble."""
     if llm is None:
-        return validate(fallback_plan(profiles, wish), profiles), "fallback"
-    text = f"Wish: {wish.strip() or 'be creative'}\n\nProfiles ({len(profiles)}):\n{_profile_lines(profiles)}"
+        return validate(fallback_plan(profiles, wish, audit=audit), profiles), "fallback"
+    if audit is not None:
+        from . import audit as audit_mod
+        setup = audit_mod.model_text(audit)
+    else:
+        setup = f"Profiles ({len(profiles)}):\n{_profile_lines(profiles)}"
+    text = f"Wish: {wish.strip() or 'be creative'}\n\n{setup}"
     if previous and change:
         import json
         text += f"\n\nYour previous plan:\n{json.dumps(previous)}\n\nThe user wants this changed: {change}"
     try:
         res = llm(instructions=INSTRUCTIONS, input=[{"type": "text", "text": text}], json_schema=SCHEMA,
-                  schema_name="omo.world_plan", purpose="omo-space.design", temperature=0.9, max_tokens=4000)
+                  schema_name="omo.world_plan", purpose="omo-space.design", temperature=0.9, max_tokens=6000,
+                  timeout=DESIGN_TIMEOUT)
         parsed = getattr(res, "parsed", None)
         if parsed is None:
             import json
@@ -191,5 +252,5 @@ def design(profiles: list[dict], wish: str, llm: Optional[Callable[..., Any]], *
             parsed = json.loads(m.group(0)) if m else None
         return validate(parsed, profiles), "model"
     except Exception:  # noqa: BLE001 - any model/parse trouble: still give them a world
-        base = previous if previous else fallback_plan(profiles, wish + " " + change)
+        base = previous if previous else fallback_plan(profiles, wish + " " + change, audit=audit)
         return validate(base, profiles), "fallback"

@@ -2,11 +2,14 @@
 Hermes designs it from your profiles, you look at the plan, and it builds a new Omo Space world with
 every profile at a desk in its own room.
 
-    1. "What kind of world?"        free text; Enter = be creative
-    2. Hermes designs it             your active model via ctx.llm (profile names + descriptions only)
-    3. The plan                      name, look, rooms and who sits where
+    1. The setup audit              what this install looks like (read-only metadata), in plain words
+       "Use your model to design it?" — nothing is sent before you say yes (n = design without the model)
+    2. "What kind of world?"        free text; Enter = be creative
+    3. Hermes designs it             your active model via ctx.llm, from the audit summary
+    4. The plan                      name, look, rooms, who sits where and WHY
        Build it / Another idea / Change something
-    4. Built                         a NEW world folder + the Hermes HQ datapack inside it
+    5. Built                         a NEW world folder + the Hermes HQ datapack inside it
+    6. "Light up every desk?"        enable omo-space in the other profiles so their desks go live
 
 The pack builds the hall around you the first time you open the world: nothing to type in game.
 Without a model (old Hermes, offline, --no-ai) the plan comes from your profile names instead.
@@ -25,6 +28,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from . import audit as setup_audit
 from . import design, firsttime, onboarding
 
 ORIGIN = (0, -60, 0)            # build origin on the flat ground (feet y -60)
@@ -69,6 +73,7 @@ def add_parser(subs: Any) -> argparse.ArgumentParser:
     p.add_argument("--saves-dir", help="Minecraft saves dir (default: Omo Space's, or the Minecraft launcher's)")
     p.add_argument("--bridge-port", type=int, default=None, help="Omo bridge port for the Board wall")
     p.add_argument("--hermes-root", default=None, help="Hermes root (default $HERMES_ROOT or ~/.hermes)")
+    p.add_argument("--audit", action="store_true", help="only audit this setup and print what would be sent, then stop")
     p.add_argument("-y", "--yes", action="store_true", help="build the first plan without asking")
     p.add_argument("--json", action="store_true", help="machine-readable result (implies --yes)")
     return p
@@ -149,6 +154,13 @@ def _icon_png(themes: list[str]) -> bytes:
             + chunk(b"IDAT", zlib.compress(b"".join(rows), 9)) + chunk(b"IEND", b""))
 
 
+def _term_width(out, default: int = 100) -> int:
+    try:
+        return max(60, min(160, os.get_terminal_size(out.fileno()).columns))
+    except (OSError, AttributeError, ValueError):
+        return default
+
+
 def show_plan(plan: dict, say: Callable[[str], None], p: Paint, width: int = 100) -> None:
     look = (f"{design.STYLES[plan['style']][0]} · {design.GROUNDS[plan['ground']].lower()} · "
             f"{design.TIMES[plan['time']][0].lower()}")
@@ -158,17 +170,89 @@ def show_plan(plan: dict, say: Callable[[str], None], p: Paint, width: int = 100
     say(f"    {p(look, p.DIM)}")
     say("")
     nw = max(len(r["name"]) for r in plan["rooms"])
+    pad = " " * (4 + nw + 6)
+    room_w = max(30, width - len(pad) - 2)
     for r in plan["rooms"]:
-        line = ((r["about"] + " · ") if r.get("about") else "") + ", ".join(r["profiles"])
-        room_w = max(24, width - nw - 12)
-        if len(line) > room_w:
-            line = line[:room_w - 1] + "…"
-        say(f"    {r['name'].ljust(nw)}  {p(str(len(r['profiles'])).rjust(2), p.GOLD)}  {p(line, p.DIM)}")
+        head = r.get("about") or ""
+        why = r.get("why") or ""
+        say(f"    {p(r['name'].ljust(nw), p.BOLD)}  {p(str(len(r['profiles'])).rjust(2), p.GOLD)}  {head}")
+        if why:
+            for wl in _wrap("why: " + why, width, pad, pad + "     "):
+                say(p(wl, p.DIM))
+        line, rows = "", []
+        for n in r["profiles"]:
+            add = (", " if line else "") + n
+            if len(line) + len(add) > room_w:
+                rows.append(line + ",")
+                line = n
+            else:
+                line += add
+        if line:
+            rows.append(line)
+        for row in rows[:3]:
+            say(f"{pad}{p(row, p.DIM)}")
+        if len(rows) > 3:
+            more = sum(len(x.split(", ")) for x in rows[3:])
+            say(f"{pad}{p(f'… and {more} more', p.DIM)}")
+
+
+def _wrap(text: str, width: int, first: str, rest: str) -> list[str]:
+    import textwrap
+    return textwrap.wrap(text, width=max(40, width - 1), initial_indent=first, subsequent_indent=rest,
+                         break_on_hyphens=False, break_long_words=False) or [first]
+
+
+def show_audit(a: dict, say: Callable[[str], None], p: Paint, width: int = 100) -> None:
+    say("")
+    say(f"  {p('◆', p.GOLD)} {p('Your setup', p.BOLD)}   {p('(read-only: names and counts, no chats or keys)', p.DIM)}")
+    for line in setup_audit.summary_lines(a):
+        rows = _wrap(line, width - 7, "", "")
+        say(f"    {p('·', p.GOLD)} {rows[0]}")
+        for r in rows[1:]:
+            say(f"      {r}")
 
 
 # --------------------------------------------------------------------------- the command
+def light_up(root: Path, names: list[str], say: Callable[[str], None], p: Paint, ask: Callable[[str], str],
+             runner: Optional[Callable[..., Any]] = None, width: int = 100) -> Optional[bool]:
+    """After a build: offer to enable omo-space in the profiles that sit at a desk but have it off, so their
+    desks go live. One y/N for the whole batch; never without a terminal. Returns how many failed."""
+    try:
+        report = {r["name"]: r for r in onboarding.profiles_report(root)}
+    except Exception:  # noqa: BLE001
+        return 0
+    todo = [report[n] for n in names if n in report and not report[n]["enabled"]]
+    if not todo:
+        return None
+    cmds = onboarding.enable_commands(todo)
+    say("")
+    say(f"    {p('Light up every desk?', p.BOLD)}")
+    for r in _wrap(f"{len(todo)} of the {len(names)} agents don't have omo-space yet, so their desks stay dark. "
+                   f"This runs `hermes -p <profile> plugins enable omo-space` for each of them "
+                   f"({', '.join(t['name'] for t in todo[:3])}{', …' if len(todo) > 3 else ''}).",
+                   width, "    ", "    "):
+        say(p(r, p.DIM))
+    try:
+        yes = ask(f"    {p('›', p.GOLD)} [Y/n] ").strip().lower() in ("", "y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        yes = False
+    if not yes:
+        say(p("    Skipped. Later: `hermes omo setup --enable-all`.", p.DIM))
+        return False
+    import io
+    import subprocess
+    buf = io.StringIO()
+    failed = onboarding._run_cmds(cmds, buf, runner or (lambda c: subprocess.run(
+        c, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180)))
+    ok = len(cmds) - failed
+    say(f"    {p('✓', p.GREEN)} {ok} desk{'s' if ok != 1 else ''} lit"
+        + (f"; {failed} failed (see `hermes omo setup`)" if failed else ""))
+    return failed == 0
+
+
 def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[..., Any]] = None,
-        out=None, err=None, ask: Callable[[str], str] = input, interactive: Optional[bool] = None) -> int:
+        out=None, err=None, ask: Callable[[str], str] = input, interactive: Optional[bool] = None,
+        runner: Optional[Callable[..., Any]] = None) -> int:
     out = out or sys.stdout
     err = err or sys.stderr
     try:
@@ -206,6 +290,29 @@ def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[.
         print(f"warning: no profile named {m!r}", file=err)
     if args.no_ai:
         llm = None
+    try:
+        audit = setup_audit.run(profiles, Path(data["root"]))
+    except Exception:  # noqa: BLE001 - an audit problem must never stop a world being made
+        audit = None
+    if getattr(args, "audit", False):
+        if audit is None:
+            print("error: could not audit this setup", file=err)
+            return 1
+        if args.json:
+            print(json.dumps(setup_audit.as_json(audit), indent=1), file=out)
+            return 0
+        width = _term_width(out) if live else 100
+        show_audit(audit, say, p, width)
+        say("")
+        for r in _wrap(f"Sent to your model when you design a world: {setup_audit.SENT}.", width, "    ", "    "):
+            say(p(r, p.DIM))
+        for r in _wrap(f"Never sent: {setup_audit.NEVER}.", width, "    ", "    "):
+            say(p(r, p.DIM))
+        say("")
+        for line in setup_audit.model_text(audit).splitlines():
+            say("    " + line)
+        return 0
+    width = _term_width(out) if live else 100
 
     try:
         n = len(profiles)
@@ -221,6 +328,25 @@ def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[.
             say(p("    (For plain Minecraft: the full building, screens as dark glass. In Omo Space every screen", p.DIM))
             say(p("    is a live agent you can talk to.)", p.DIM))
 
+        if audit is not None:
+            show_audit(audit, say, p, width)
+        if interactive and llm is not None:
+            say("")
+            say(f"    {p('Use your Hermes model to design it from this?', p.BOLD)}")
+            for r in _wrap("Your own model and login, nothing new to set up. Nothing is sent until you say yes. "
+                           f"It gets: {setup_audit.SENT}. Never {setup_audit.NEVER}.", width, "    ", "    "):
+                say(p(r, p.DIM))
+            for r in _wrap("n = design it here without the model.  `hermes omo create --audit` shows the exact text.",
+                           width, "    ", "    "):
+                say(p(r, p.DIM))
+            okd = ask(f"    {p('›', p.GOLD)} [Y/n] ").strip().lower()
+            if okd in ("q", "quit", "exit"):
+                say("    Nothing written.")
+                return 0
+            if okd not in ("", "y", "yes"):
+                llm = None
+                say(p("    OK: designing without the model.", p.DIM))
+
         wish = " ".join(args.wish or []).strip()
         if interactive and not wish:
             say("")
@@ -231,14 +357,14 @@ def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[.
 
         def make(prev=None, change=""):
             label = "Reworking the plan…" if change else "Hermes is designing your world…"
-            return _spin(out, p, label, lambda: design.design(profiles, wish, llm, previous=prev, change=change),
-                         live)
+            return _spin(out, p, label, lambda: design.design(profiles, wish, llm, previous=prev, change=change,
+                                                              audit=audit), live)
 
         plan, source = make()
         while True:
             if args.name:
                 plan["name"] = args.name
-            show_plan(plan, say, p)
+            show_plan(plan, say, p, width)
             if source == "fallback" and llm is not None:
                 say(p("    (No answer from the model, so rooms follow your profile names.)", p.DIM))
             if not interactive:
@@ -268,7 +394,8 @@ def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[.
     ordered = [profiles[i] for i in order]
     rooms, k = [], 0
     for r in plan["rooms"]:
-        rooms.append({"name": r["name"], "theme": design.THEMES[r["theme"]], "about": r.get("about", ""),
+        rooms.append({"name": r["name"], "theme": design.THEMES[r["theme"]],
+                      "about": r.get("why") or r.get("about", ""),
                       "desks": list(range(k, k + len(r["profiles"])))})
         k += len(r["profiles"])
     tod = design.TIMES[plan["time"]][1]
@@ -309,9 +436,14 @@ def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[.
         for line in firsttime.no_game_text(saves)[:-1]:
             say("    " + line)
         return 0
+    lit = light_up(root, [pr["name"] for pr in ordered], say, p, ask, runner, width) if interactive else None
+    if lit is not None:
+        say("")
     say(f"  {p('◆', p.GOLD)} {p('Your world is ready. To go in:', p.BOLD)}")
-    for line in firsttime.open_steps(name, vanilla):
-        say("    " + line)
+    arrival = plan.get("tagline", "") if lit is not False else ""
+    for line in firsttime.open_steps(name, vanilla, arrival=arrival):
+        for r in _wrap(line, width, "    ", "       "):
+            say(r)
     say("")
     say(f"    {p('Getting around', p.BOLD)} {p('(first time in Minecraft? this is all you need)', p.DIM)}")
     for line in firsttime.controls_lines():
@@ -319,7 +451,9 @@ def run(args: Any, *, board_port: Optional[int] = None, llm: Optional[Callable[.
     if interactive and firsttime.launcher_command(vanilla):
         game = "the Minecraft Launcher" if vanilla else "Omo Space"
         try:
-            yes = ask(f"\n    Open {game} now? [Y/n] ").strip().lower() in ("", "y", "yes")
+            say("")
+            say(f"    {p(f'Open {game} now?', p.BOLD)}")
+            yes = ask(f"    {p('›', p.GOLD)} [Y/n] ").strip().lower() in ("", "y", "yes")
         except (EOFError, KeyboardInterrupt):
             yes = False
         if yes:
@@ -386,6 +520,17 @@ def open_last(out=None, ask: Callable[[str], str] = input, interactive: Optional
     return 0
 
 
+def tool_audit(root: Optional[Path] = None) -> str:
+    """The ``omo_audit_setup`` tool: the read-only audit as JSON. Sends nothing to a model."""
+    try:
+        from .worldgen import inventory as inv
+        data = inv.collect(root)
+        a = setup_audit.run(data["profiles"][:MAX_DESKS], Path(data["root"]))
+        return json.dumps(setup_audit.as_json(a))
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": f"omo_audit_setup failed: {type(exc).__name__}"})
+
+
 def tool_create(args: Any, *, llm: Optional[Callable[..., Any]] = None, board_port: Optional[int] = None) -> str:
     """The ``omo_create_world`` tool: the same designer and builder, unattended, JSON back."""
     import io
@@ -409,7 +554,8 @@ def tool_create(args: Any, *, llm: Optional[Callable[..., Any]] = None, board_po
         return json.dumps({
             "created": True, "world": res["world"], "path": res["path"], "game": game,
             "tagline": plan.get("tagline", ""), "look": [plan["style"], plan["ground"], plan["time"]],
-            "rooms": [{"name": r["name"], "about": r.get("about", ""), "desks": len(r["profiles"])}
+            "rooms": [{"name": r["name"], "about": r.get("about", ""), "why": r.get("why", ""),
+                       "desks": len(r["profiles"])}
                       for r in plan["rooms"]],
             "designed_by": res["designed_by"],
             "next": f"Open {game} -> Singleplayer -> {res['world']}; the building rises around the player on arrival.",

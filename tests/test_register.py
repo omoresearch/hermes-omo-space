@@ -42,7 +42,7 @@ def test_manifest_scalars():
     assert _scalar("name") == "omo-space"
     assert _scalar("label") == "Omo Space"
     assert _scalar("kind") == "standalone"
-    assert _scalar("version") == '"0.2.0"'
+    assert _scalar("version") == '"0.3.0"'
     assert re.fullmatch(r'">=0\.\d+\.\d+"', _scalar("requires_hermes"))
     assert _scalar("license") == "MIT"
     assert "requires_env" not in _manifest_text()
@@ -67,7 +67,7 @@ def test_register_matches_manifest(plugin, fake_ctx_cls, tmp_path):
     plugin.register(ctx)
     tools = sorted(t["name"] for t in ctx.tools)
     hooks = sorted({n for n, _ in ctx.hooks})
-    assert tools == sorted(_manifest_list("provides_tools")) == ["omo_create_world", "omo_notify", "omo_status"]
+    assert tools == sorted(_manifest_list("provides_tools")) == ["omo_audit_setup", "omo_create_world", "omo_notify", "omo_status"]
     assert hooks == sorted(_manifest_list("provides_hooks"))
     assert len(ctx.hooks) == len(hooks)  # each hook registered once
     assert {t["toolset"] for t in ctx.tools} == {"omo"}
@@ -88,7 +88,7 @@ def test_register_on_minimal_ctx(plugin, fake_ctx_cls, hermes_home):
     plugin.register(ctx)
     marker = hermes_home / "plugin-data" / "omo-space" / "feed" / "omo-feed.json"
     assert json.loads(marker.read_text())["profile"] == "default"
-    assert sorted(t["name"] for t in ctx.tools) == ["omo_create_world", "omo_notify", "omo_status"]
+    assert sorted(t["name"] for t in ctx.tools) == ["omo_audit_setup", "omo_create_world", "omo_notify", "omo_status"]
 
 
 def test_profile_derived_from_hermes_home(plugin, fake_ctx_cls, tmp_path, monkeypatch):
@@ -131,7 +131,7 @@ def test_register_survives_unwritable_data_dir(plugin, fake_ctx_cls, tmp_path):
     blocker.write_text("x")
     ctx = fake_ctx_cls(data_dir=blocker / "pd")
     plugin.register(ctx)  # must not raise
-    assert len(ctx.tools) == 3
+    assert len(ctx.tools) == 4
 
 
 def test_bad_bridge_url_setting_does_not_break_register(plugin, fake_ctx_cls, tmp_path):
@@ -245,7 +245,7 @@ def test_hooks_older_hermes_lacks_are_skipped(plugin, fake_ctx_cls, tmp_path, mo
     hooks = {n for n, _ in ctx.hooks}
     assert "post_compaction" not in hooks
     assert hooks == declared - {"post_compaction"}
-    assert sorted(t["name"] for t in ctx.tools) == ["omo_create_world", "omo_notify", "omo_status"]
+    assert sorted(t["name"] for t in ctx.tools) == ["omo_audit_setup", "omo_create_world", "omo_notify", "omo_status"]
 
 
 def test_all_hooks_registered_when_hermes_knows_them(plugin, fake_ctx_cls, tmp_path, monkeypatch):

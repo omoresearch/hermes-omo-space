@@ -142,5 +142,5 @@ def test_register_on_a_hermes_without_command_apis(plugin, fake_ctx_cls, tmp_pat
 
     ctx = OldCtx(minimal=True)
     plugin.register(ctx)
-    assert {t["name"] for t in ctx.tools} == {"omo_status", "omo_notify", "omo_create_world"}
+    assert {t["name"] for t in ctx.tools} == {"omo_audit_setup", "omo_status", "omo_notify", "omo_create_world"}
     assert len(ctx.hooks) == 13 and ctx.commands == [] and ctx.cli == []

@@ -1,15 +1,18 @@
 name: omo-space
 label: Omo Space
 kind: standalone
-version: "0.2.0"
+version: "0.3.0"
 author: Omo Research
 license: MIT
 description: >
   `hermes omo`: say what kind of world you want (or let it be creative) and your model designs a Minecraft
   world for your agents, every profile at a desk with screens in rooms named for what they do; it is
-  written as a new Omo Space world that builds itself when you open it. The designer sends only your wish
-  and profile names/descriptions to your own active model via ctx.llm.
-  The omo_create_world tool does the same from any chat (Desktop, Telegram...).
+  written as a new Omo Space world that builds itself when you open it. It first audits the setup
+  (read-only metadata), shows what it found and asks before anything goes to your own active model via
+  ctx.llm: profile names, descriptions, chat platform names, job and session counts, skill names and days
+  since last use. To count sessions it opens each profile's state.db read-only with one aggregate query
+  (source, count, newest start time); no message or title is read.
+  The omo_audit_setup and omo_create_world tools do the same from any chat (Desktop, Telegram...).
   Also: see your whole Hermes system (profiles, CLI/TUI/gateway sessions, subagents, cron, kanban) as a
   place inside Omo Space, the Omo Research Minecraft world. Hooks write a metadata-only activity feed
   (session/turn/tool starts and ends, kanban transitions, compactions, API error codes; never message
@@ -26,12 +29,14 @@ description: >
   `hermes omo setup` also reads each profile's plugins.enabled/disabled and plugin dir names; it runs
   `hermes -p <profile> plugins enable omo-space` or `config set ...bridge_url` only after a y/N prompt
   at a terminal, and without a TTY it only prints the commands.
-  Reads no secrets, starts no background processes, never approves or blocks tools.
+  Reads no secrets, never approves or blocks tools. Hooks and tools start no processes; the CLI runs
+  those `hermes` commands, or opens the game app, only after you answer yes at a terminal.
 # v0.21.6 is the oldest release tested. post_compaction (v0.22.3) is registered only where the
 # running Hermes fires it; every other hook, get_config, ctx.state and ctx.llm are in v0.21.6.
 requires_hermes: ">=0.21.6"
 tags: [omo, minecraft, observability, dashboard]
 provides_tools:
+  - omo_audit_setup
   - omo_status
   - omo_notify
   - omo_create_world

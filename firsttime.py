@@ -47,7 +47,7 @@ def controls_lines() -> list[str]:
     return [f"  {k.ljust(w)}  {v}" for k, v in CONTROLS]
 
 
-def open_steps(name: str, vanilla: bool) -> list[str]:
+def open_steps(name: str, vanilla: bool, arrival: str = "") -> list[str]:
     game = "the Minecraft Launcher" if vanilla else "Omo Space"
     first = ("Pick Minecraft: Java Edition, choose version 26.2, press Play" if vanilla
              else "Press Play (sign in with Microsoft the first time)")
@@ -55,7 +55,7 @@ def open_steps(name: str, vanilla: bool) -> list[str]:
         f"1. Open {game}. {first}.",
         "2. Click Singleplayer.",
         f"3. Double-click \"{name}\".",
-        "4. You arrive at the front door and the building rises around you.",
+        "4. The building rises around you as you arrive." + (f" {arrival}" if arrival else ""),
     ]
 
 

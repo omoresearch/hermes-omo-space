@@ -22,7 +22,7 @@ from typing import Any, Optional
 from . import cli, schemas, tools
 from .feed import Feed
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 PLUGIN_ID = "omo-space"
 logger = logging.getLogger(__name__)
 
@@ -194,6 +194,13 @@ def register(ctx: Any) -> None:
         from . import create
         return create.tool_create(args, llm=_llm(ctx))
 
+    def omo_audit_setup(args: Any = None, **kwargs: Any) -> str:
+        from . import create
+        return create.tool_audit()
+
+    ctx.register_tool(name="omo_audit_setup", toolset="omo", schema=schemas.OMO_AUDIT_SETUP,
+                      handler=omo_audit_setup, description="Audit this Hermes setup before designing a world",
+                      emoji="🔎")
     ctx.register_tool(name="omo_create_world", toolset="omo", schema=schemas.OMO_CREATE_WORLD,
                       handler=omo_create_world, description="Design and build a Minecraft world for your agents",
                       emoji="🏰")

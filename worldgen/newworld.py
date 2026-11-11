@@ -18,9 +18,10 @@ GROUNDS = {
     "snow": ["minecraft:dirt", "minecraft:snow_block"],
     "sand": ["minecraft:sandstone", "minecraft:sand"],
     "stone": ["minecraft:stone", "minecraft:smooth_stone"],
+    "forest": ["minecraft:dirt", "minecraft:podzol"],
 }
 BIOMES = {"grass": "minecraft:plains", "snow": "minecraft:snowy_plains", "sand": "minecraft:desert",
-          "stone": "minecraft:plains"}
+          "stone": "minecraft:plains", "forest": "minecraft:old_growth_spruce_taiga"}
 SURFACE_Y = -61            # bedrock -64, 2 fill layers, top layer -61: feet at -60
 _BAD_DIR = re.compile(r"[^A-Za-z0-9 _.()'-]")
 

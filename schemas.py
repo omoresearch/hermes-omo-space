@@ -41,10 +41,23 @@ OMO_NOTIFY = {
     },
 }
 
+OMO_AUDIT_SETUP = {
+    "name": "omo_audit_setup",
+    "description": (
+        "Read-only first step before omo_create_world: audit how this Hermes install is used (how many "
+        "profiles, which talk on chat platforms, which run scheduled jobs, which skills set each one apart, "
+        "which have been quiet) and return a plain-language summary plus exactly what the world designer "
+        "would send to the user's own model. Sends nothing to any model and changes nothing. Show the user "
+        "the summary and ask before calling omo_create_world."
+    ),
+    "parameters": {"type": "object", "properties": {}, "required": []},
+}
+
 OMO_CREATE_WORLD = {
     "name": "omo_create_world",
     "description": (
-        "Design and build a new Minecraft world for the user's Hermes agents: every Hermes profile gets a desk "
+        "Design and build a new Minecraft world for the user's Hermes agents, adapted to how their setup is "
+        "used (call omo_audit_setup first, show the user what it found and get their OK). Every Hermes profile gets a desk "
         "with a wall of screens, grouped into rooms named for what the agents do, with a name, look and "
         "time of day that fit the wish. Writes ONE new world folder (Omo Space's saves if installed, else the "
         "Minecraft launcher's) and never touches existing worlds. Use it when the user asks for a world, an "

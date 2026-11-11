@@ -18,33 +18,55 @@ hermes plugins install omoresearch/hermes-omo-space --enable
 hermes omo
 ```
 
-That's it. `hermes omo` asks one question, **what kind of world would you like?** Describe it in your
-own words ("a little treehouse village in a forest") or just press Enter and Hermes surprises you.
-Your own model then designs it from your Hermes profiles: a name, a look, and rooms named for what your
-agents actually do, each agent at a desk with a wall of screens. You see the plan first:
+That's it. `hermes omo` first **looks at your setup** and tells you what it found, in plain words:
+
+```
+  ◆ Your setup   (read-only: names and counts, no chats or keys)
+    · 49 profiles: a fleet: departments, with quiet agents in their own corner.
+    · 41 talk to people on discord.
+    · 8 run scheduled jobs (33 in all).
+    · 23 have been quiet for 30+ days: they get a quiet corner.
+    · Shared specialities: creative-experiment-operations (7), meta-ad-library-research (6).
+
+    Use your Hermes model to design it from this? Your own model and login; nothing is sent until you say yes.
+    › [Y/n]
+```
+
+Say yes and your own model (the one Hermes already uses, with its existing login; no new key) designs a
+world for **your** setup: agents that share skills sit together, chat-facing agents get their own room,
+quiet ones go to a calm corner, one agent gets a single cosy room and a fleet gets departments. Say `n`
+and the same audit plans the rooms without any model. `hermes omo create --audit` prints the exact text
+the model would get.
+
+Then it asks one question, **what kind of world would you like?** Describe it in your own words
+("a little treehouse village in a forest") or just press Enter and Hermes surprises you. You see the plan
+first, with **why** each room exists:
 
 ```
   ◆ Mossbough Hollow   Lanterns sway between the branches; your crew is already up the ladders.
-    Cherry Blossom · meadow · morning
+    Forest Grove · forest floor · night
 
-    Lookout Nest     2  Keeping watch over the machine, terminals and agents · default, floor5-ag…
-    Canopy Council   1  Weekly reviews, commitments and kanban triage · omo-00-chief-of-staff
-    Acorn Archive    2  Mining streams for long-form video ideas · lf-01-ideas, yt-01-video-resea…
-    Bark Edit Bay    1  Cutting each long-form video to its plan · yt-03-editing
+    Lookout Nest     2  Keeping watch over the machine and agents
+                        why: both run the schedules (23 jobs)
+                        default, floor5-agent
+    Bark Edit Bay    3  Cutting each long-form video to its plan
+                        why: all 3 share the video-editing skills
+                        yt-01-video-research, yt-03-editing, lf-01-ideas
 
     Happy with it? Enter builds it.  a = a different idea,  q = quit,
     or type what to change, e.g. "make it night" or "put the editors together".
 ```
 
-Press Enter and the world is made. Then it tells you exactly how to get in, offers to open the game for
-you, and shows the five keys you need:
+Press Enter and the world is made. It offers to **light up every desk** (one y/N: it enables omo-space in
+the profiles that don't have it yet, so their screens go live), then tells you exactly how to get in,
+offers to open the game for you, and shows the five keys you need:
 
 ```
   ◆ Your world is ready. To go in:
     1. Open Omo Space. Press Play (sign in with Microsoft the first time).
     2. Click Singleplayer.
     3. Double-click "Mossbough Hollow".
-    4. You arrive at the front door and the building rises around you.
+    4. The building rises around you as you arrive.
 
     Getting around (first time in Minecraft? this is all you need)
     W A S D      walk
@@ -55,7 +77,8 @@ you, and shows the five keys you need:
 ```
 
 You can also just ask Hermes in any chat (Desktop, Telegram, ...): *"build me a world for my agents,
-something cosy"*. The `omo_create_world` tool does the same thing.
+something cosy"*. The agent calls `omo_audit_setup` first, shows you what it found and asks, then
+`omo_create_world` builds it.
 
 ### Never played Minecraft?
 
@@ -199,9 +222,17 @@ The plugin adds:
   is refused. Hooks never touch the network. On Linux, before probing, the plugin reads
   `/proc/net/tcp` and `/proc/net/tcp6` to check that the process listening on the bridge port belongs
   to you; if another user's Omo bridge owns the port it is reported as "not yours" and never queried.
-- **The world designer** (`hermes omo` / `create`, only when you run it) sends your wish plus each profile's
-  name and its `profile.yaml` display name/description to **your own active model** through Hermes'
-  `ctx.llm` (no keys handled by the plugin). Never chats, memories, config values or secrets. `--no-ai` skips it.
+- **The setup audit** (`hermes omo` / `create`, `omo_audit_setup`) is read-only and sends nothing anywhere.
+  Per profile it reads `profile.yaml` (description), `config.yaml` (model, enabled platform names, plugin
+  names), `cron/jobs.json` (job count), the names of skill folders (SKILL.md is never opened) and, from
+  `state.db` opened **read-only**, one aggregate query: `SELECT source, COUNT(*), MAX(started_at) FROM
+  sessions GROUP BY source`. No message, title, prompt or other column is read. A Hermes without that table
+  falls back to the newest mtime in `sessions/` (stat only).
+- **The world designer** (only after you say yes at the prompt) sends your wish plus the audit summary to
+  **your own active model** through Hermes' `ctx.llm` (no keys handled by the plugin): profile names,
+  descriptions, chat platform names, job and session counts, skill names and days since last use.
+  `hermes omo create --audit` prints the exact text. Never chats, memories, SOUL files, config values or
+  secrets. Answering `n`, or `--no-ai`, designs from the audit without any model.
 - **Opening the game** (`hermes omo open`, or after a build) starts the Omo Space app or the Minecraft
   Launcher only after you answer yes at a terminal; never from the agent tool or without a terminal.
 - **No telemetry, no accounts, no secrets.** Nothing is reported anywhere; there is nothing to opt into.
@@ -213,7 +244,7 @@ The plugin adds:
   run it) reads, for every profile under your Hermes root: `profile.yaml` (display name/description),
   `config.yaml` (only model name/provider, enabled platform names and enabled plugin names are kept),
   `cron/jobs.json` (job count only), plugin dir names and SKILL.md file names (never opened). It never
-  opens `.env`, `auth.json`, `state.db`, logs or session files.
+  opens `.env`, `auth.json`, memories, logs or session files; `state.db` only read-only, as above.
 - **Writes:** only its own profile-scoped dir, `<HERMES_HOME>/plugin-data/<namespace>/feed/`
   (dir `0700`, files `0600` on Linux/macOS; on Windows the profile dir's per-user ACL applies).
   `hermes omo world` writes only to the output path you give it; `hermes omo world --install` writes
@@ -234,9 +265,10 @@ The plugin adds:
   ids, pids, models, titles or tool history. The text of `omo_notify` messages is off the wall Board unless
   the bridge service runs with `OMO_BOARD_MESSAGES=1`. HUD notices draw only on your own screen
   (`/omonotices off` hides them, e.g. on stream). Nothing from the feed is written into world data.
-- **Never:** reads secrets or credential files, spawns processes or threads, approves or blocks
-  tools (`pre_tool_call` always returns `None`), injects context, patches Hermes, or touches a
-  running game or bridge.
+- **Never:** reads secrets or credential files, approves or blocks tools (`pre_tool_call` always
+  returns `None`), injects context, patches Hermes, or touches a running game or bridge. Hooks and
+  tools start no processes or threads. The `hermes omo` command starts a process only after you answer
+  yes at a terminal (see above), and draws its progress spinner on a short-lived thread.
 - **Cost:** every hook is a dict update plus at most one small atomic write and one append. Hooks
   catch every exception. After a filesystem error the writer pauses for 30 s instead of retrying on every call.
 
